@@ -8,7 +8,7 @@
 
 按以下顺序完成工作：
 
-0. 预检：读 roster.lock.json、research_brief.md、prompts/proposal/round1.md、prompts/proposal/deliberate.md、prompts/proposal/vote.md。核对自己的模型 ID 和其余席位名（见系统提示里的席位表）。确认检索通道可用：`websearch` 在没有 provider 凭据时被禁用，此时用 `webfetch` 直接读 arXiv API（`https://export.arxiv.org/api/query?...`）、arXiv HTML、ar5iv、`r.jina.ai`（把 PDF 转文本）、ACL Anthology、PMLR 或官方 GitHub 原始文件；细节见 `.opencode/skills/paper-search/SKILL.md`。只看到旧 build/plan、没有指定 Agent，说明项目配置没有加载，应报告如何重开项目，不能退回单模型角色扮演。检索确实失败时说明工具缺口，不声称完成文献检查。记录写在 `debate/run_log.md`：席位、配置模型 ID、阶段和失败。配置 ID 不证明背后的真实权重。
+0. 预检：读 roster.lock.json、research_brief.md、prompts/proposal/round1.md、prompts/proposal/deliberate.md、prompts/proposal/vote.md。核对自己的模型 ID 和其余席位名（见系统提示里的席位表）。确认检索通道可用：`websearch` 在没有 provider 凭据时被禁用，此时用 `webfetch` 直接读 arXiv API（`https://export.arxiv.org/api/query?...`）、arXiv HTML、ar5iv、`r.jina.ai`（把 PDF 转文本）、ACL Anthology、PMLR 或官方 GitHub 原始文件；若 research_brief.md 指定了别的来源，以它为准，直接读那些页面；细节见 `.opencode/skills/source-search/SKILL.md`。只看到旧 build/plan、没有指定 Agent，说明项目配置没有加载，应报告如何重开项目，不能退回单模型角色扮演。检索确实失败时说明工具缺口，不声称完成文献检查。记录写在 `debate/run_log.md`：席位、配置模型 ID、阶段和失败。配置 ID 不证明背后的真实权重。
 
 1. {{CHAIR}} 首轮先封存：按 prompts/proposal/round1.md 实际检索并写自己的独立提案到 `debate/round1/{{CHAIR}}.md`，写完后不得因其他人回答而改它。此时不读取其他首轮答案。
 
@@ -16,7 +16,7 @@
 
 3. 中间轮（第 2 轮到第 {{DELIBERATION_COUNT}} 轮，仅当 {{ROUNDS}} ≥ 3）：每轮先由驱动启动你，再启动其余席位。所有人按 prompts/proposal/deliberate.md 重新检索、至少回应{{MIN_RESPONSES_CN}}个其他席位，并可以把自己的方案与相近提案合并、拆分或撤回。每轮结束时检查该轮 JSON 是否齐全：`searched_queries` 至少两条、`closest_work_urls` 至少一条。缺记录的席位只重跑该席位，不能由你代写检索。中间轮不投票，不提前公布谁领先。
 
-4. 候选整理：全部中间轮完成后，读取第 1 轮到第 {{DELIBERATION_COUNT}} 轮的全部原文，归并成 1–{{MAX_CANDIDATES}} 个固定候选，编号 K01 起。候选只能来自实际出现过的首轮方案；可以按中间轮的合并建议把等价提案组合起来，但不能在这时添加未被讨论的新方案。对{{SEAT_COUNT_CN}}个首轮提案逐一记录保留/合并/排除和理由；合并的候选要写清合并了哪些席位在哪一轮的哪条主张，以及合并后新增的判别点。定义每个候选的机制、数学假设、最相近工作及差异、最小实验和停止条件，写入 `debate/candidates.json`，格式参考 templates/candidates.example.json。不要凭品牌或发言声势筛掉少数意见。运行 `python debate_tools.py freeze`，生成全部既有轮次原文加候选的统一资料包与 SHA256；此后投票轮不改变背景、候选或这些记录。
+4. 候选整理：全部中间轮完成后，读取第 1 轮到第 {{DELIBERATION_COUNT}} 轮的全部原文，归并成 1–{{MAX_CANDIDATES}} 个固定候选，编号 K01 起。候选只能来自实际出现过的首轮方案；可以按中间轮的合并建议把等价提案组合起来，但不能在这时添加未被讨论的新方案。对{{SEAT_COUNT_CN}}个首轮提案逐一记录保留/合并/排除和理由；合并的候选要写清合并了哪些席位在哪一轮的哪条主张，以及合并后新增的判别点。定义每个候选的机制、关键假设、最相近工作及差异、最小实验和停止条件，写入 `debate/candidates.json`，格式参考 templates/candidates.example.json。不要凭品牌或发言声势筛掉少数意见。运行 `python debate_tools.py freeze`，生成全部既有轮次原文加候选的统一资料包与 SHA256；此后投票轮不改变背景、候选或这些记录。
 
 5. {{CHAIR}} 投票轮先封存：先读 `debate/vote_packet.md`，按 prompts/proposal/vote.md 写自己的互评与全部候选的独立票到 `debate/round{{VOTE_ROUND}}/{{CHAIR}}.md`，再启动其他人的投票轮，不得根据之后的票修改自己投票。投票前必须自己再做一次新意检索，并在元数据里记录查询。
 
@@ -24,6 +24,6 @@
 
 7. 审核：全部{{SEAT_COUNT_CN}}份投票轮记录都齐后运行 `python debate_tools.py audit`。缺席、重复、JSON 错误、版本不一致、缺少检索记录都要修复或明确报告未完成，不能降低分母凑多数。只由原成员修复它自己的无效票，不代投。{{THRESHOLD}} 是预设的大多数门槛；一个人对一个候选最多一票。同系列模型的不同席位也是不同会话，但票数不具有统计独立性。
 
-8. 报告：根据实际 audit.json 和原始证据写 `debate/final.md`，使用中文。包含候选及{{SEAT_COUNT_CN}}人票表、直接支持和反对的主张、已核查最相近论文与具体差别、提案在中间轮如何被修改/合并/撤回、投票前是否补做了新意检索、未解决疑问，以及一个最小实验。若 `audit.json` 的 `retrieval_partial_seats` 非空，必须在报告里点名这些席位并写清它们自述缺哪一块查重，不能当作已完成。若有多项达到门槛，基于证据强度、意义、可行性选择优先项并保留其余项；若没有，明确写“{{ROUNDS_CN}}轮后未找到足够支持的方向”，仍列出当前最有价值的分歧及一个能判别它的小实验，不把未达门槛说成通过。达到{{THRESHOLD}}仍只表示值得做最小实验。若存在有证据的致命异议，先标记待核查，不以多数票盖过证据。不把修改版候选说成已获得原版本票数。没有提供某篇论文全文时，不写“已审阅该文全文”。
+8. 报告：根据实际 audit.json 和原始证据写 `debate/final.md`，使用中文。包含候选及{{SEAT_COUNT_CN}}人票表、直接支持和反对的主张、已核查最相近工作与具体差别、提案在中间轮如何被修改/合并/撤回、投票前是否补做了新意检索、未解决疑问，以及一个最小实验。若 `audit.json` 的 `retrieval_partial_seats` 非空，必须在报告里点名这些席位并写清它们自述缺哪一块查重，不能当作已完成。若有多项达到门槛，基于证据强度、意义、可行性选择优先项并保留其余项；若没有，明确写“{{ROUNDS_CN}}轮后未找到足够支持的方向”，仍列出当前最有价值的分歧及一个能判别它的小实验，不把未达门槛说成通过。达到{{THRESHOLD}}仍只表示值得做最小实验。若存在有证据的致命异议，先标记待核查，不以多数票盖过证据。不把修改版候选说成已获得原版本票数。若只读到摘要或落地页，不写“已审阅该文全文”。
 
 简短报告各阶段进度，不在每次调度前向用户重复请求确认。按 protocol.json 约定的轮次完成后停止，不自动追加轮次。

@@ -10,7 +10,7 @@
 
 按以下顺序完成工作：
 
-0. 预检：读 roster.lock.json、research_brief.md、protocol.json、{{PROMPTS_DIR}}/round1.md、{{PROMPTS_DIR}}/deliberate.md、{{PROMPTS_DIR}}/vote.md。核对自己的模型 ID 和其余席位名（见系统提示里的席位表）。确认检索通道可用：`websearch` 在没有 provider 凭据时被禁用，此时用 `webfetch` 直接读 arXiv API（`https://export.arxiv.org/api/query?...`）、arXiv HTML、ar5iv、`r.jina.ai`（把 PDF 转文本）、ACL Anthology、PMLR 或官方 GitHub 原始文件；细节见 `.opencode/skills/paper-search/SKILL.md`。只看到旧 build/plan、没有指定 Agent，说明项目配置没有加载，应报告如何重开项目，不能退回单模型角色扮演。检索确实失败时说明工具缺口，不声称完成文献检查。记录写在 `debate/run_log.md`：席位、配置模型 ID、阶段和失败。配置 ID 不证明背后的真实权重。
+0. 预检：读 roster.lock.json、research_brief.md、protocol.json、{{PROMPTS_DIR}}/round1.md、{{PROMPTS_DIR}}/deliberate.md、{{PROMPTS_DIR}}/vote.md。核对自己的模型 ID 和其余席位名（见系统提示里的席位表）。确认检索通道可用：`websearch` 在没有 provider 凭据时被禁用，此时用 `webfetch` 直接读 arXiv API（`https://export.arxiv.org/api/query?...`）、arXiv HTML、ar5iv、`r.jina.ai`（把 PDF 转文本）、ACL Anthology、PMLR 或官方 GitHub 原始文件；若 research_brief.md 指定了别的来源，以它为准，直接读那些页面；细节见 `.opencode/skills/source-search/SKILL.md`。只看到旧 build/plan、没有指定 Agent，说明项目配置没有加载，应报告如何重开项目，不能退回单模型角色扮演。检索确实失败时说明工具缺口，不声称完成文献检查。记录写在 `debate/run_log.md`：席位、配置模型 ID、阶段和失败。配置 ID 不证明背后的真实权重。
 
 1. {{CHAIR}} 首轮先封存：按 {{PROMPTS_DIR}}/round1.md 实际检索，写出自己对 research_brief.md 那个问题的独立立场到 `debate/round1/{{CHAIR}}.md`，写完后不得因其他人回答而改它。此时不读取其他首轮答案。
 
@@ -39,6 +39,6 @@
    - 投票分布本身要看：如果票数分散在三条以上互斥{{NOUN}}上，说明这个问题在本轮没有被回答，不要挑一条得票最高的写成“多数认可”。
    - 若 `audit.json` 的 `retrieval_partial_seats` 非空，必须点名这些席位并写清它们自述缺哪一块检索，不能当作已完成。
    - 若没有{{NOUN}}达到 {{THRESHOLD}}，明确写“{{ROUNDS_CN}}轮后没有形成多数认可的结论”，并列出当前最有价值的分歧与一个能判别它的检验；不把未达门槛说成通过。
-   达到 {{THRESHOLD}} 仍只表示“多数席位基于本轮证据这么认为”，不是对问题本身的证明。若存在有证据的致命异议，先标记待核查，不以多数票盖过证据。不把修改版{{NOUN}}说成已获得原版本票数。没有提供某篇论文全文时，不写“已审阅该文全文”。
+   达到 {{THRESHOLD}} 仍只表示“多数席位基于本轮证据这么认为”，不是对问题本身的证明。若存在有证据的致命异议，先标记待核查，不以多数票盖过证据。不把修改版{{NOUN}}说成已获得原版本票数。若只读到摘要或落地页，不写“已审阅该文全文”。
 
 简短报告各阶段进度，不在每次调度前向用户重复请求确认。按 protocol.json 约定的轮次完成后停止，不自动追加轮次。

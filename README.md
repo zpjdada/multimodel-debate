@@ -196,6 +196,7 @@ templates/           candidates.example.json, conclusions.example.json, solution
 debate_tools.py      setup, freeze, audit, doctor
 run_debate.py        driver: one real session per seat, per round
 test_tools.py        offline tests, synthetic IDs only
+.opencode/skills/source-search/SKILL.md   how a seat retrieves without websearch
 Dockerfile           optional container image
 docker-compose.yml   optional container run
 .env.example         where the container finds your config directory
@@ -303,9 +304,11 @@ conditions and cost, and must not fuse several adopted solutions into a
 
 `websearch` needs a connected search provider. Without one, `setup` defaults to
 `--search off`, which denies `websearch` and sends seats through `webfetch`:
-arXiv API for search, arXiv HTML / ar5iv for full text, and `r.jina.ai` to turn
-ACL, PMLR, and NeurIPS PDFs into text. See
-`.opencode/skills/paper-search/SKILL.md`.
+arXiv API and OpenAlex for papers, arXiv HTML / ar5iv for full text, `r.jina.ai`
+to turn any PDF into text, and the source named in `research_brief.md` read
+directly when the topic is not a paper topic (official documents, standards,
+government pages, statistical databases). The package does not assume an
+academic field. See `.opencode/skills/source-search/SKILL.md`.
 
 Retrieval status is three-state and machine-checked:
 

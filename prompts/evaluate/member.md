@@ -8,7 +8,7 @@
 
 检索与证据：
 - 实际调用可用的检索工具。仅能聊天不等于具备检索能力；工具不可用时说明阻塞，不能写成“已查阅”。
-- 本项目的 `websearch` 可能因没有 provider 凭据而被禁用（`doctor` 会说明）。此时用 `webfetch` 直接读一手来源：arXiv API 检索 `https://export.arxiv.org/api/query?search_query=all:%22关键词%22&max_results=20`，论文用 `https://arxiv.org/abs/<id>` 或 `https://arxiv.org/html/<id>`；ACL Anthology 用 `https://aclanthology.org/<id>/`；PMLR、NeurIPS/ICML 论文集与 GitHub 原始文件也可直接读。完整写法见 `.opencode/skills/paper-search/SKILL.md`。
+- 本项目的 `websearch` 可能因没有 provider 凭据而被禁用（`doctor` 会说明）。此时用 `webfetch` 直接读一手来源：arXiv API 检索 `https://export.arxiv.org/api/query?search_query=all:%22关键词%22&max_results=20`，论文用 `https://arxiv.org/abs/<id>` 或 `https://arxiv.org/html/<id>`；ACL Anthology 用 `https://aclanthology.org/<id>/`；PMLR、NeurIPS/ICML 论文集与 GitHub 原始文件也可直接读。完整写法见 `.opencode/skills/source-search/SKILL.md`。若 research_brief.md 指定了别的来源（政策文件、标准、官方数据库、行业报告），以它为准，直接用 `webfetch` 读那些页面；该类来源确实取不到时如实写 `partial`，不要拿论文库的结果顶替。
 - 每人首轮核查至少{{MIN_SOURCES_CN}}份不同的一手资料，优先原论文与官方代码，其中至少一篇不在背景列出的阅读清单里。至少两份要读到与你判断直接相关的方法段、结果表或附录，不能全靠搜索摘要。达不到这个读取深度时，首轮 JSON 的 `retrieval_status` 必须写 `partial` 并在正文说明缺什么；不要为了好看写 `completed`。
 - 读正文的通道（落地页通常只有摘要）：`https://arxiv.org/html/<id>v<版>` 优先；没有 HTML 时用 `https://ar5iv.labs.arxiv.org/html/<id>`；PDF 用 `https://r.jina.ai/<PDF的完整URL>`（ACL、PMLR、NeurIPS 的 `.pdf` 都能转成文本，公式会失真，具体式子以 arXiv HTML 为准）。`openreview.net` 会返回 Cloudflare 人机验证页，经 `r.jina.ai` 也读不到；改用该论文的 arXiv 版本，并注明读的是哪个版本。
 - 每条重要引用写标题、年份、URL、读到的章节和访问层级（完整方法段/部分正文/仅摘要），以及它到底支持或反驳哪条主张。不能把查到标题当成读过方法。
@@ -18,10 +18,10 @@
 判断标准：
 - 立场必须可证伪：写清在什么数据、什么设置下这个判断会被推翻。含糊的“取决于场景”不算立场，除非你能说出取决于哪个可测量的变量。
 - 区分三类证据：直接测过这件事的实验、测了邻近问题但可外推的实验、只有机制论证没有实测。三者不能当作同等强度混用。
-- 文献结论要与其实验条件对齐；不要用一篇在小模型上的结果支撑大模型上的断言，也不要只转述别人的转述。
+- 文献结论要与其实验条件对齐；不要用一个小范围设置（单一对象、单一样本、单一环境）下的结果支撑更大范围上的断言，也不要只转述别人的转述。
 - 能指出自己原来的判断被证据推翻，是有效研究结果。允许最后没有多数认可的结论，也允许多数席位都停在“证据不足”。
 - 支持、反对、修改对方观点都可以；不要求为了“辩论”强行反对，也不要求为了达到 {{THRESHOLD}} 强行支持。
 
 投票轮是单选：每个席位只认一条{{NOUN}}，或者 NONE。`{{SUPPORT_FIELD}}`=true 表示“我自己的判断与这条{{NOUN}}一致，且我能给出支撑它的证据”，它要求 {{SCORE_FLOOR_TEXT}}、附上你实际核查过的证据 URL，并且你没有尚未解决的致命异议。置信度低于该线但仍认同方向时，请选 NONE 并在正文说明。
 
-只使用已授权的检索、读取与本地讨论记录工具，不进行发布、对外发送消息或启动 GPU 训练。具体本轮任务和输出格式由主持提供。
+只使用已授权的检索、读取与本地讨论记录工具，不进行发布、对外发送消息或启动大规模训练任务。具体本轮任务和输出格式由主持提供。

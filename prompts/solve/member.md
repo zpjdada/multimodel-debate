@@ -8,7 +8,7 @@
 
 检索与证据：
 - 实际调用可用的检索工具。仅能聊天不等于具备检索能力；工具不可用时说明阻塞，不能写成“已查阅”。
-- 本项目的 `websearch` 可能因没有 provider 凭据而被禁用（`doctor` 会说明）。此时用 `webfetch` 直接读一手来源：arXiv API 检索 `https://export.arxiv.org/api/query?search_query=all:%22关键词%22&max_results=20`，论文用 `https://arxiv.org/abs/<id>` 或 `https://arxiv.org/html/<id>`；ACL Anthology 用 `https://aclanthology.org/<id>/`；PMLR、NeurIPS/ICML 论文集与官方 GitHub 原始文件也可直接读。完整写法见 `.opencode/skills/paper-search/SKILL.md`。
+- 本项目的 `websearch` 可能因没有 provider 凭据而被禁用（`doctor` 会说明）。此时用 `webfetch` 直接读一手来源：arXiv API 检索 `https://export.arxiv.org/api/query?search_query=all:%22关键词%22&max_results=20`，论文用 `https://arxiv.org/abs/<id>` 或 `https://arxiv.org/html/<id>`；ACL Anthology 用 `https://aclanthology.org/<id>/`；PMLR、NeurIPS/ICML 论文集与官方 GitHub 原始文件也可直接读。完整写法见 `.opencode/skills/source-search/SKILL.md`。若 research_brief.md 指定了别的来源（政策文件、标准、官方数据库、行业报告），以它为准，直接用 `webfetch` 读那些页面；该类来源确实取不到时如实写 `partial`，不要拿论文库的结果顶替。
 - 每人首轮核查至少{{MIN_SOURCES_CN}}份不同的一手资料，优先原论文、官方文档与官方代码，其中至少一篇不在背景列出的阅读清单里。至少两份要读到与你的做法直接相关的方法段或附录——你要说的“这样做能成”必须有可核对的依据。达不到这个读取深度时，首轮 JSON 的 `retrieval_status` 必须写 `partial` 并在正文说明缺什么；不要为了好看写 `completed`。
 - 读正文的通道（落地页通常只有摘要）：`https://arxiv.org/html/<id>v<版>` 优先；没有 HTML 时用 `https://ar5iv.labs.arxiv.org/html/<id>`；PDF 用 `https://r.jina.ai/<PDF的完整URL>`（ACL、PMLR、NeurIPS 的 `.pdf` 都能转成文本，公式会失真，具体式子以 arXiv HTML 为准）。`openreview.net` 会返回 Cloudflare 人机验证页，经 `r.jina.ai` 也读不到；改用该论文的 arXiv 版本，并注明读的是哪个版本。
 - 每条重要引用写标题、年份、URL、读到的章节和访问层级（完整方法段/部分正文/仅摘要），以及它到底支撑你方案里的哪一步。
@@ -16,7 +16,7 @@
 
 解决问题时的判断标准：
 - 说清方案解决的是问题的哪一部分，以及它明确不解决什么。把症状当根因、只在边角上打补丁的解法，不算解决。
-- 每个关键步骤写出它依赖的假设与前置条件（数据、算力、权限、时间、人）。前提不成立时整个方案不成立，必须写清。
+- 每个关键步骤写出它依赖的假设与前置条件（数据、工具、预算、权限、时间、人）。前提不成立时整个方案不成立，必须写清。
 - 区分三类依据：有人实测过这个做法、实测过邻近问题可外推、只有机制论证。三者不能当作同等强度混用。
 - 指出自己方案最可能失败的环节，比宣称它一定能成更有价值。允许最后没有值得采纳的方案。
 - 支持、反对、修改对方观点都可以；不要求为了“辩论”强行反对，也不要求为了达到 {{THRESHOLD}} 强行支持。

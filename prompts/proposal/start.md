@@ -1,6 +1,6 @@
 现在开始多席位、多轮的科研讨论。具体轮数看 protocol.json 的 `rounds`（本包默认 3 轮），下面用 R 表示总轮数。
 
-先读 research_brief.md、roster.lock.json、protocol.json、prompts/proposal/round1.md、prompts/proposal/deliberate.md、prompts/proposal/vote.md。本次主题以 research_brief.md 为准：机制要清楚，且能按背景里写明的硬件条件做最小判别实验；相邻问题是否在范围内，也由 research_brief.md 界定。目标是寻找值得优先做最小实验的候选，不预设一定有新方向；"这条线只剩边角"如果能被论证成立，是合法结论。
+先读 research_brief.md、roster.lock.json、protocol.json、prompts/proposal/round1.md、prompts/proposal/deliberate.md、prompts/proposal/vote.md。本次主题以 research_brief.md 为准：它界定问题、范围、硬约束与验收方式；相邻问题是否在范围内，也由它界定。目标是寻找值得优先投入一次最小判别实验的候选，不预设一定有新方向；"这条线只剩边角"如果能被论证成立，是合法结论。
 
 调度方式：全部席位由 `run_debate.py` 逐席位启动真实 `opencode run --agent <名>` 会话完成，彼此不共享上下文，只通过 `debate/` 下的文件通信。OpenCode 2.0.30 的 subagent 工具本身损坏（`Subagent session not found`），不要试图用它拉起其他席位，也不要模拟多个角色。
 

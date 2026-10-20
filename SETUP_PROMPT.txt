@@ -19,6 +19,6 @@
 5. 这个包应在专用目录使用；已有 opencode.json/jsonc 时不覆盖它。不要修改我的全局供应商配置、auth.json 或 CC Switch 配置。
 6. 生成配置必须是 V2 原生形状：顶层 `agents` 与 `commands`，权限是 `permissions` 规则数组（最后一条命中者生效）。不要再生成 V1 的 `agent`/`command`/`permission` 键，否则 OpenCode 会报废弃警告。每个角色各一个 Agent，恰好一个 primary（debate-chair），其余为 subagent；model 字段都明确绑定实际 ID；subagent 不能再派生其他 Agent（权限里 subagent deny）。
 7. 运行 python debate_tools.py doctor。它会用 opencode debug agents 核对：席位是否真的被运行时加载、模型是否与 roster.lock.json 一致、mode 是否正确、是否恰好一个 primary、成员 websearch/webfetch/skill 权限、以及 websearch 配置与实际 provider 凭据是否相符。任何一项失败都要先修好，不要跳过。
-8. 检索通道：OpenCode 内置 websearch 需要已连接的搜索 provider 凭据。没有凭据时 `setup` 默认 `--search off`，权限里 deny websearch，席位改走 webfetch：arXiv API 检索，arXiv HTML / ar5iv 读正文，`r.jina.ai` 把 ACL、PMLR、NeurIPS 的 PDF 转成文本（见 .opencode/skills/paper-search/SKILL.md）。若本机已 /connect 了 Exa/Tavily/Firecrawl/Parallel/TinyFish 之一，用 `--search on` 重新生成。
+8. 检索通道：OpenCode 内置 websearch 需要已连接的搜索 provider 凭据。没有凭据时 `setup` 默认 `--search off`，权限里 deny websearch，席位改走 webfetch：arXiv API 与 OpenAlex 检索论文，arXiv HTML / ar5iv 读正文，`r.jina.ai` 把任意 PDF 转成文本；题目不是论文类时直接读 research_brief.md 指定的页面（政策文件、标准、官方数据库、行业报告）。见 .opencode/skills/source-search/SKILL.md。若本机已 /connect 了 Exa/Tavily/Firecrawl/Parallel/TinyFish 之一，用 `--search on` 重新生成。
 
 最后只给我实际席位/模型映射表、模式（`protocol.json` 的 mode）、轮数（`rounds`）、门槛（`threshold`）、doctor 的结论，以及下一步应运行哪条命令。不要声称讨论已运行，也不要伪造讨论结果。

@@ -82,7 +82,7 @@ python debate_tools.py setup --mode solve
 
 `websearch` 需要连接搜索 provider，并配置相应凭据，支持 Exa、Tavily、Firecrawl、Parallel 和 TinyFish。缺少凭据时，搜索会失败，CLI 也会返回 `exit 1`，即使席位发言已经输出完毕。
 
-- **没有搜索凭据**：`setup` 默认使用 `--search off`，禁用 `websearch`。席位通过 `webfetch` 检索和读取论文：用 arXiv API 搜索，用 arXiv HTML / ar5iv 读正文，也可通过 `r.jina.ai` 读取 ACL、PMLR、NeurIPS 的 PDF 文本。具体用法见 `.opencode/skills/paper-search/SKILL.md`。
+- **没有搜索凭据**：`setup` 默认使用 `--search off`，禁用 `websearch`。席位通过 `webfetch` 取一手来源：论文用 arXiv API 与 OpenAlex 检索、arXiv HTML / ar5iv 读正文；任意 PDF 可用 `r.jina.ai` 转成文本；题目不是论文类时（政策文件、标准、政府页面、统计数据库），直接读 `research_brief.md` 指定的那些页面。这个包不假定学术领域。具体用法见 `.opencode/skills/source-search/SKILL.md`。
 - **已有搜索凭据**：先在 OpenCode 中通过 `/connect` 连接 provider，再用 `python debate_tools.py setup --search on ...` 重新生成配置。
 
 `doctor` 会核对配置和凭据，不一致时检查失败。访问 `openreview.net` 遇到 Cloudflare 人机验证时，改用论文的 arXiv 版本。
