@@ -4,44 +4,67 @@ This package makes several real model seats — each its own OpenCode agent and
 session — independently search the literature, read each other's full text
 across rounds, and then vote on a frozen catalog. Every seat is a separate
 `opencode run` session with no shared context; files under `debate/` are the
-only channel between them. It runs in two switchable modes: find new research
-directions (`proposal`), or settle a given question by majority
-(`evaluate`).
+only channel between them. It runs in three switchable modes: find new research
+directions (`proposal`), settle a given question by majority (`evaluate`), or
+work out a solution to a stated problem with your own knowledge base (`solve`).
 
 The shipped default is six model families across ten seats, three rounds, with
 an 8/10 threshold. Those numbers live in `roles.json` and `protocol.json`, not
 in code.
 
-## Two modes
+## Three modes
 
 One code path, one set of rounds and one audit. The `mode` field in
 `protocol.json` changes only what a round produces and what a vote means.
 
-| | `proposal` (default) | `evaluate` |
-|---|---|---|
-| The question | is there a new direction worth building | what is the answer to this given question |
-| Round one | one proposal per seat | one stated position per seat (support / oppose / conditional / insufficient evidence) |
-| Middle rounds | merge nearby proposals, withdraw broken ones | narrow conditions, revise or drop a position |
-| Catalog | `debate/candidates.json`, `K01`… | `debate/conclusions.json`, `C01`… |
-| Vote | one judgment per candidate, several may be recommended | **single choice**: one conclusion or `NONE` |
-| Default threshold | 80% of seats (10 → 8/10) | strict majority (10 → 6/10) |
-| Approved key in `audit.json` | `approved_candidates` | `adopted_conclusions` |
-| Prompts | `prompts/proposal/` | `prompts/evaluate/` |
-| Legitimate outcome | no direction worth pursuing | no majority conclusion, or most seats stop at "insufficient evidence" |
+| | `proposal` (default) | `evaluate` | `solve` |
+|---|---|---|---|
+| The question | is there a new direction worth building | what is the answer to this given question | what should we actually do about this given problem |
+| Round one | one proposal per seat | one stated position per seat (support / oppose / conditional / insufficient evidence) | one draft solution per seat |
+| Middle rounds | merge nearby proposals, withdraw broken ones | narrow conditions, revise or drop a position | merge complementary steps, split or narrow a solution |
+| Catalog | `debate/candidates.json`, `K01`… | `debate/conclusions.json`, `C01`… | `debate/solutions.json`, `S01`… |
+| Vote | one judgment per candidate, several may be recommended | **single choice**: one conclusion or `NONE` | one judgment per solution, several may be adopted |
+| Scores | novelty / value / feasibility | confidence | value / soundness / feasibility |
+| Default threshold | 80% of seats (10 → 8/10) | strict majority (10 → 6/10) | 80% of seats (10 → 8/10) |
+| Approved key in `audit.json` | `approved_candidates` | `adopted_conclusions` | `adopted_solutions` |
+| Prompts | `prompts/proposal/` | `prompts/evaluate/` | `prompts/solve/` |
+| Legitimate outcome | no direction worth pursuing | no majority conclusion, or most seats stop at "insufficient evidence" | no solution worth adopting |
 
 The lower `evaluate` bar is not a laxer standard — it asks "what do we think"
-rather than "is this worth spending a GPU-week on". Mode and threshold both go
+rather than "is this worth committing to". `proposal` and `solve` share the 80%
+bar because both end in a decision to spend effort. Mode and threshold both go
 into `packet_sha256`, so switching mode after `freeze` is rejected.
 
-To switch, put `"mode": "evaluate"` in `protocol.json`, or run
-`python debate_tools.py setup --mode evaluate`, which recalculates the default
+`proposal` is the only mode where novelty is a criterion: closest work is a
+veto there, because a direction that already exists is not a direction. In
+`solve` prior art is *evidence* — reusing a known method correctly is a
+legitimate answer, and the ballot asks whether the solution works under the
+constraints in your brief, not whether anyone thought of it first.
+
+To switch, put `"mode": "solve"` in `protocol.json`, or run
+`python debate_tools.py setup --mode solve`, which recalculates the default
 threshold for that mode and keeps `rounds`. The mode is baked into the agents'
 system prompts at setup time, so changing it means regenerating
 `opencode.json` and `roster.lock.json`, exactly as changing the seat table does.
 
-In `evaluate` mode the brief needs one **falsifiable question** — "does X hold
-under Y", "is there evidence for Z" — not a broad topic. When the question is
-ambiguous, seats are told to state which reading they answer.
+### What to write in `research_brief.md`
+
+Each mode expects a different shape of brief:
+
+- **`proposal`** — a field with boundaries, resources and an honest statement
+  that no new direction may exist. Example: *"Local LLM inference on a single
+  24 GB GPU. Which mechanism-level change would cut decode latency enough to be
+  worth a minimal discriminating experiment?"*
+- **`evaluate`** — one **falsifiable question** — "does X hold under Y", "is
+  there evidence for Z" — not a broad topic. When the question is ambiguous,
+  seats are told to state which reading they answer. Example: *"Does
+  speculative decoding still beat plain decoding at batch size 32 on a single
+  A100, given current draft-model overheads?"*
+- **`solve`** — a problem, the resources and permissions you actually have, and
+  what counts as done. Example: *"We have 3,000 scanned Chinese contracts as
+  PDFs, no OCR budget, one workstation with a 16 GB GPU and four weeks. Extract
+  party names, effective dates and penalty clauses with an auditable error
+  rate. What do we build?"* Put the knowledge base under `materials/`.
 
 ## Your own knowledge base
 
@@ -96,14 +119,15 @@ gitignored, so your material is never published with the package.
 
 ```
 roles.json           seat table: id, family, role, focus, one "chair": true
-protocol.json        mode (proposal | evaluate), rounds and threshold
+protocol.json        mode (proposal | evaluate | solve), rounds and threshold
 model_map.json       family -> real provider/model ID, produced by setup
 model_map.example.json
 research_brief.md    the background brief the seats start from (yours, gitignored)
 research_brief.example.md   the shipped template for it
 prompts/proposal/    member / chair / start / round1 / deliberate / vote
 prompts/evaluate/    the same six files for evaluate mode
-templates/           candidates.example.json, conclusions.example.json
+prompts/solve/       the same six files for solve mode
+templates/           candidates.example.json, conclusions.example.json, solutions.example.json
 debate_tools.py      setup, freeze, audit, doctor
 run_debate.py        driver: one real session per seat, per round
 test_tools.py        offline tests, synthetic IDs only
@@ -125,9 +149,9 @@ Generated per machine and not meant to be committed: `opencode.json`,
   and consolidation. `rounds: 2` is the minimal "propose, freeze, vote" run.
   `threshold.denominator` must equal the seat count. A fixed denominator is
   deliberate: absences cannot lower the bar. Omit `threshold` and the mode's
-  default applies (proposal ~80%: 10 → 8/10; evaluate strict majority: 10 →
-  6/10); write half of it and setup refuses, so a truncated config cannot take
-  effect. Omit `mode` and it defaults to `proposal`.
+  default applies (proposal and solve ~80%: 10 → 8/10; evaluate strict majority:
+  10 → 6/10); write half of it and setup refuses, so a truncated config cannot
+  take effect. Omit `mode` and it defaults to `proposal`.
 - **`model_map.json`** — one real ID per family. `python debate_tools.py models`
   suggests candidates from `opencode models`; ambiguous lookups must be
   resolved by hand, never guessed.
@@ -145,21 +169,25 @@ digest mismatch instead of quietly passing.
 
 ## What the rounds are
 
-Described for `proposal`; the `evaluate` difference is in parentheses.
+Described for `proposal`; the `evaluate` and `solve` differences are in
+parentheses.
 
 **Round one — independent.** The chair writes its own proposal first. Then each
 remaining seat runs its own session, searches the web for primary sources, and
 submits one proposal with at least three distinct source URLs (in `evaluate`: a
-stated position with its evidence URLs). No seat may read another seat's
-round-one file.
+stated position with its evidence URLs; in `solve`: one draft solution with the
+sources backing each step, plus the preconditions it needs). No seat may read
+another seat's round-one file.
 
 **Middle rounds — review and consolidation** (when `rounds` ≥ 3). Each seat
 reads every earlier round, runs fresh searches, responds to at least two other
 seats, and may merge nearby proposals into one candidate that still fits a
 single paper, split a proposal down to its novel half, or withdraw its own (in
-`evaluate`: narrow a claim to a conditional form, revise, or drop it). No votes
-in these rounds. Each record must name at least two queries it actually ran and
-at least one closest-work / evidence URL; `audit` rejects records without them.
+`evaluate`: narrow a claim to a conditional form, revise, or drop it; in
+`solve`: merge complementary steps into one doable procedure, split it, or
+narrow the part it claims to solve). No votes in these rounds. Each record must
+name at least two queries it actually ran and at least one closest-work /
+evidence URL; `audit` rejects records without them.
 
 **Merge — freeze.** The chair merges the first-round proposals, using the
 middle-round merge suggestions, into 1–5 candidates, each with a mechanism, an
@@ -167,17 +195,22 @@ assumption, the closest prior work and the difference, a minimum experiment,
 and a stop condition (in `evaluate`: 1–5 mutually exclusive, truth-apt
 conclusions, each with its strongest objection and what observation would
 overturn it, with "insufficient evidence" kept as its own conclusion rather
-than as a footnote). Every proposal must be kept, merged, or excluded with a
-stated reason; nothing new may appear at this step. `freeze` then writes
-`debate/vote_packet.md` containing the catalog plus every earlier round's text
-verbatim, and records its SHA256.
+than as a footnote; in `solve`: 1–5 executable solutions, each with what it
+claims to solve, why it works, its evidence, its preconditions, and the step
+most likely to fail, and each stating what it explicitly does *not* solve).
+Every proposal must be kept, merged, or excluded with a stated reason; nothing
+new may appear at this step. `freeze` then writes `debate/vote_packet.md`
+containing the catalog plus every earlier round's text verbatim, and records its
+SHA256.
 
 **Vote round.** Every seat reads the same packet, must search once more,
 respond substantively to at least two other seats, and vote on each candidate
 (in `evaluate`: single choice — one conclusion or `NONE`; two endorsements from
 one seat are rejected, since "the majority-endorsed conclusion" is undefined
-when a seat endorses two mutually exclusive ones). The chair seals its own vote
-before the others start.
+when a seat endorses two mutually exclusive ones; in `solve`: one judgment per
+solution and several may be adopted, scored on value / soundness / feasibility,
+since two solutions that apply under different conditions are not in conflict).
+The chair seals its own vote before the others start.
 
 **Audit and report.** `audit` checks completeness, version, structure, recorded
 retrieval, and the tally against the fixed denominator. `final` writes
@@ -185,7 +218,9 @@ retrieval, and the tally against the fixed denominator. `final` writes
 that is the result. In `evaluate` mode the report must also show the spread: if
 the votes scatter across three or more mutually exclusive conclusions, the
 question was not answered this round, and the highest count must not be written
-up as a consensus.
+up as a consensus. In `solve` mode the report must state each adopted solution's
+conditions and cost, and must not fuse several adopted solutions into a
+"combined plan" that no seat ever voted on.
 
 ## Retrieval
 
@@ -287,12 +322,22 @@ They verify that missing votes cannot shrink the denominator, that a changed
 packet or config is rejected, that a post-freeze threshold change is rejected,
 that both a 2-round and a 3-round run complete, that a missing middle round or
 an unrecorded search blocks the freeze, that a 7-seat / 5-of-7 run completes,
-and that `partial` is recorded rather than silently accepted. Ten `evaluate`
-cases lock the other mode: 6/10 adopts and 5/10 does not, a ballot endorsing two
+and that `partial` is recorded rather than silently accepted. Sixteen `evaluate`
+cases lock the second mode: 6/10 adopts and 5/10 does not, a ballot endorsing two
 conclusions is rejected, the confidence floor is enforced, the wrong catalog
 file fails with a message naming the right one, a mode change after freeze is
-rejected, and switching mode recalculates the default threshold. They say
-nothing about whether a paper exists.
+rejected, and switching mode recalculates the default threshold. Thirteen `solve`
+cases lock the third: 8/10 adopts and 7/10 does not, two solutions can be
+adopted in one ballot, the soundness floor is enforced, a proposal-shaped ballot
+missing `soundness_score` is rejected, `preferred_solution` must be one of the
+adopted, the packet renders "方案目录" rather than the proposal wording,
+switching between `solve` and `evaluate` recomputes 8/10 ↔ 6/10, `audit` prints
+the mode's own key, and the `repair` prompt only asks for the fields that exist
+in the round being repaired. Four `PromptRenderTests` guard the files seats read
+straight off disk: no `{{TOKEN}}` may survive in `start.md`, `round1.md`,
+`deliberate.md` or `vote.md`, `setup` refuses to write a config when one does,
+and the score floors written into `vote.md` must match
+`MODES["solve"]["score_floor"]`. They say nothing about whether a paper exists.
 
 ## Licence
 

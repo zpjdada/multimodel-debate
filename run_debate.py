@@ -5,8 +5,9 @@ Why this exists: the harness `subagent` tool in OpenCode 2.0.30 fails with
 "Subagent session not found", so a chair cannot launch seats itself. This driver
 launches each seat as a real independent agent session and uses files as the only
 channel between seats. Prompts come from the current mode's directory
-(prompts/proposal/ or prompts/evaluate/); no seat is simulated.
+(prompts/proposal/, prompts/evaluate/ or prompts/solve/); no seat is simulated.
 Seat count, chair, mode and threshold come from roles.json / protocol.json.
+Per-mode wording lives in debate_tools.MODES; nothing here branches on the mode name.
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ def agent_name(seat):
 
 
 def mode():
-    """当前模式（proposal / evaluate）。提示词目录、目录文件、票的含义都由它决定。"""
+    """当前模式（proposal / evaluate / solve）。提示词目录、目录文件、票的含义都由它决定。"""
     return d.mode_of(d.load_protocol(ROOT, len(seats())))
 
 
@@ -216,24 +217,16 @@ def merge():
     vote_round = protocol["rounds"]
     earlier = "、".join(f"debate/round{n}/" for n in range(1, vote_round))
     merges = [f"第 {n} 轮" for n in range(2, vote_round)]
-    if m is d.MODES["evaluate"]:
-        closing = ("每条结论必须互斥、可判真假；\"现有证据不足以判断\"若要保留，就单独写成一条结论，"
-                   "不能塞进肯定结论的备注里。写完后只回复一行：CONCLUSIONS=<结论个数>。")
-        merge_rule = ("中间轮的互评只能用来把已有立场收窄成更精确的条件式或拆成互斥的两条；"
-                      "不得引入任何席位都没提过的新论点。")
-    else:
-        closing = f"写完后只回复一行：CANDIDATES=<候选个数>。不要开始第 {vote_round} 轮。"
-        merge_rule = ("中间轮的合并建议只能用于把已有首轮提案组合成候选；不得引入新的机制主张，"
-                      "并要在候选里写清合并了哪几轮、哪些席位的哪条主张。")
+    closing = m["merge_closing"].format(vote_round=vote_round)
     prompt = (f"读取 {earlier} 下全部 {len(order)} 个席位在各轮的完整发言，"
               f"按 {m['prompts_dir']}/chair.md 第 4 步" + m["merge_hint"]
               + f" 1–{d.MAX_CANDIDATES} 个固定{m['noun']}，写入 {m['catalog_file']}，"
               f"格式参照 {m['template']}。"
               f"{len(order)} 个首轮{m['source_noun']}必须逐一保留/合并/说明排除理由，"
               f"不得新增未被讨论的{m['noun']}。"
-              + (merge_rule if merges else "")
+              + (m["merge_rule"] if merges else "")
               + closing)
-    print("[merge] 主持归并候选 ...", flush=True)
+    print(f"[merge] 主持归并{m['noun']} ...", flush=True)
     text = run_agent("debate-chair", prompt, "merge")
     manifest = d.freeze(ROOT)
     print(f"[merge] 已冻结 packet_sha256={manifest['packet_sha256'][:16]}… "
@@ -242,15 +235,13 @@ def merge():
 
 
 def deliberate(number: int, resume=False, only=None, parallel=1):
-    """中间轮：互评、合并邻近方案、带着新检索再查一遍新意。不投票。"""
+    """中间轮：互评、合并邻近的产出、带着新检索再查一遍。不投票。"""
     m = mode()
     prompt = (f"读取 research_brief.md、{m['prompts_dir']}/deliberate.md 与 debate/round1/ 到 "
               f"debate/round{number - 1}/ 的全部发言，"
               f"按 deliberate.md 的要求完成第 {number} 轮互评。"
               f"不要读取 debate/round{number}/ 下同轮的其他人文件、任何投票、audit.json 或 final.md。"
-              + ("如果你认为两个相近方案应当合并，就在正文和元数据里写明合并了哪些原提案；本轮不投票。"
-                 if m is d.MODES["proposal"] else
-                 "如果你要修改或收窄自己的立场，就在正文和元数据里写清改动与理由；本轮不投票。")
+              + m["deliberate_hint"]
               + f"正文末尾必须附 {m['prompts_dir']}/deliberate.md 规定的 JSON 代码块，agent_id 与 round 用真实值。"
               "只返回正文本身。")
 
@@ -274,9 +265,7 @@ def vote(resume=False, only=None, parallel=1):
               "按 vote.md 的要求完成互评与投票。"
               f"资料包里有全部 {count} 席此前各轮的原文和冻结{m['noun']}；"
               f"不要读取 debate/round{number}/ 下任何文件、votes.csv、audit.json 或 final.md。"
-              + ("投票前必须再做一次针对候选新意的检索，并在元数据里记录实际查询。"
-                 if m is d.MODES["proposal"] else
-                 "投票前必须再做一次针对性检索，并在元数据里记录实际查询。")
+              + m["vote_hint"]
               + f"正文末尾必须附 {m['prompts_dir']}/vote.md 规定的 JSON 代码块，"
               "packet_sha256 用资料包里的完整值。"
               "只返回正文本身。")
@@ -319,20 +308,34 @@ def repair(seat: str, round_no: int, problem: str):
     body, old_meta = split_metadata(previous)
     keep = ("agent_id", "round", "packet_sha256", m["preferred_field"])
     payload = {key: old_meta.get(key) for key in keep if key in old_meta}
-    prompt = ("你的投票轮元数据 JSON 有一个机器校验失败的地方，只需要修这一处。"              "下面是你的**原文元数据**，不要读任何文件，不要找其他 JSON：\n\n"
+    vote_round = d.load_protocol(ROOT, len(seats()))["rounds"]
+    # 第 1 轮与中间轮没有票，说成“投票轮”会让席位去找不存在的票。
+    kind = "投票轮" if round_no == vote_round else "本轮"
+    # 第 1 轮没有互评与票；对首轮提这些字段，模型会照着规则 1 造出不存在的回应。
+    if round_no == 1:
+        rules_1 = ""
+        rules_3 = "3. `searched_queries` 只保留你正文里真实列出的查询。\n"
+    else:
+        rules_1 = ("1. `responses` 每条的 `to_agent` 必须恰好是一个席位 ID 字符串"
+                   f"（{'、'.join(seats())} 之一，不能是你自己 {seat}）。复合的那条要拆成多条，"
+                   "各自保留你在正文里对该席位说的内容；其余字段逐字不动。\n")
+        if round_no == vote_round:
+            rules_3 = ("3. `votes` 的条目、分值、objection、reason 一律不得增加、删除或改写。"
+                       + ("单选：`endorse`=true 的条目最多一条，不得因为修复变成多条。"
+                          if m["ballot_choice"] else "")
+                       + "`searched_queries` 只保留你正文里真实列出的查询。\n")
+        else:
+            rules_3 = ("3. `merges` 与 `withdraws` 只保留你正文里真实说过的内容，"
+                       "`searched_queries` 同样只留实际用过的查询。\n")
+    prompt = (f"你的{kind}元数据 JSON 有一个机器校验失败的地方，只需要修这一处。"
+              "下面是你的**原文元数据**，不要读任何文件，不要找其他 JSON：\n\n"
               "```json\n" + json.dumps(old_meta, ensure_ascii=False, indent=2) + "\n```\n\n"
               f"问题：{problem}\n\n"
-              "规则：\n"
-              "1. `responses` 每条的 `to_agent` 必须恰好是一个席位 ID 字符串"
-              f"（{'、'.join(seats())} 之一，不能是你自己 {seat}）。复合的那条要拆成多条，"
-              "各自保留你在正文里对该席位说的内容；其余字段逐字不动。\n"
-              "2. 这些字段必须与上面完全一致："
+              "规则：\n" + rules_1
+              + "2. 这些字段必须与上面完全一致："
               + json.dumps(payload, ensure_ascii=False) + "\n"
-              "3. `votes` 的条目、分值、objection、reason 一律不得增加、删除或改写。"
-              + ("单选：`endorse`=true 的条目最多一条，不得因为修复变成多条。"
-                 if m["ballot_choice"] else "")
-              + "`searched_queries` 只保留你正文里真实列出的查询。\n"
-              "4. 输出只有一个 ```json 代码块，内容是上面 JSON 修好后的完整对象。"
+              + rules_3
+              + "4. 输出只有一个 ```json 代码块，内容是上面 JSON 修好后的完整对象。"
               "不要输出正文、不要解释、不要确认语、不要附加其他字段。")
     text = run_agent(agent_name(seat), prompt, f"repair-r{round_no}-{seat}")
     try:
@@ -359,7 +362,7 @@ def repair(seat: str, round_no: int, problem: str):
 def audit():
     result = d.audit(ROOT)
     m = d.mode_of(result["protocol"])
-    print(json.dumps({m["items_key"]: result["candidates"],
+    print(json.dumps({m["items_key"]: result[m["items_key"]],
                       "approved": result[m["approved_key"]]}, ensure_ascii=False, indent=2))
 
 
@@ -373,13 +376,8 @@ def final():
     sources = "、".join(f"debate/round{n}/" for n in range(1, vote_round + 1))
     threshold = audit_data.get("protocol", {}).get("threshold") or protocol["threshold"]
     bar = f"{threshold['numerator']}/{threshold['denominator']}"
-    if m is d.MODES["evaluate"]:
-        verdict = (f"不得把未达 {bar} 的结论写成通过；票数分散在三条以上互斥结论上时，"
-                   "明确写\"本轮没有形成多数认可的结论\"，不要挑票数最高的一条充当共识。")
-        extra = "要写清各席位在中间轮里如何修改或收窄了自己的立场，以及投票前是否补做了检索。"
-    else:
-        verdict = f"不得把未达 {bar} 的候选写成通过；有致命异议时先标待核查。"
-        extra = "要写清提案在中间轮里被如何修改或合并，以及投票前是否补做了新意检索。"
+    verdict = m["final_verdict"].format(bar=bar)
+    extra = m["final_extra"]
     prompt = (f"读取 debate/audit.json、debate/votes.csv、{m['catalog_file']} 和 {sources} 下全部 "
               f"{count} 个席位在各轮的原文，按 {m['prompts_dir']}/chair.md 第 8 步用中文写 debate/final.md。"
               "必须按 audit.json 的真实票数写，" + verdict + extra

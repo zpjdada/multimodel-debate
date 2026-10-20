@@ -25,11 +25,15 @@ MAX_ROUNDS = 4      # 再多轮也不改变“先冻结、后投票”的结构
 DEFAULT_ROUNDS = 3  # 未提供 protocol.json 时的默认总轮数
 PARTIAL_NOTE_RE = re.compile(r"首轮自述查重未完（retrieval_status=partial）：[^。]*。\s*")
 
-# 两种模式共用同一套轮次、冻结、哈希与门槛检查，只有“一轮产出什么”和“票怎么算”不同。
-# proposal：首轮各自提一个新方案，最后投票判断哪些候选值得做最小实验。
-# evaluate：首轮各自回答同一个问题，最后投票选出多数席位认可的结论（允许没有结论）。
+# 三种模式共用同一套轮次、冻结、哈希与门槛检查，只有“一轮产出什么”和“票怎么算”不同。
+# proposal：首轮各自提一个新方向，最后投票判断哪些候选值得优先做最小实验（要新意）。
+# evaluate：首轮各自回答同一个问题，最后单选投票选出多数席位认可的结论（允许没有结论）。
+# solve：首轮各自提一个可执行解法，最后多选投票选出多数席位认可、准备动手做的方案（不要求新意）。
+# 提示词目录、目录文件名、票的字段名、门槛算法、以及各轮指令里那些随模式变化的句子全部放在这张表里：
+# 运行器不再按模式名分支，加模式只需加一条表项和一整套提示词。
 MODES = {
     "proposal": {
+        "purpose": "找值得优先做最小实验的新方向",
         "source_prefix": "P-",          # 首轮产出编号前缀
         "source_id_field": "proposal_id",
         "source_key": "source_proposals",
@@ -48,13 +52,22 @@ MODES = {
         "catalog_file": "debate/candidates.json",
         "template": "templates/candidates.example.json",
         "prompts_dir": "prompts/proposal",
+        "strict_majority": False,        # 八成席位愿意投入，才推进
         "default_ratio": 0.8,
         "noun": "候选",
         "round1_hint": "严格按其中要求完成第一轮独立检索与提案。",
         "merge_hint": "把首轮提案归并为",
         "source_noun": "提案",
+        "merge_rule": ("中间轮的合并建议只能用于把已有首轮提案组合成候选；不得引入新的机制主张，"
+                       "并要在候选里写清合并了哪几轮、哪些席位的哪条主张。"),
+        "merge_closing": ("写完后只回复一行：CANDIDATES=<候选个数>。不要开始第 {vote_round} 轮。"),
+        "deliberate_hint": ("如果你认为两个相近方案应当合并，就在正文和元数据里写明合并了哪些原提案；本轮不投票。"),
+        "vote_hint": "投票前必须再做一次针对候选新意的检索，并在元数据里记录实际查询。",
+        "final_verdict": "不得把未达 {bar} 的候选写成通过；有致命异议时先标待核查。",
+        "final_extra": "要写清提案在中间轮里被如何修改或合并，以及投票前是否补做了新意检索。",
     },
     "evaluate": {
+        "purpose": "对给定问题取多数认可的结论",
         "source_prefix": "S-",          # S = stance，首轮是立场而不是提案
         "source_id_field": "position_id",
         "source_key": "source_positions",
@@ -73,11 +86,60 @@ MODES = {
         "catalog_file": "debate/conclusions.json",
         "template": "templates/conclusions.example.json",
         "prompts_dir": "prompts/evaluate",
-        "default_ratio": 0.5,            # 严格多数：denominator//2 + 1
+        "strict_majority": True,         # 过半即达成，问题本身不需要投入资源
         "noun": "结论",
         "round1_hint": "严格按其中要求完成第一轮独立检索，并对 research_brief.md 里的问题给出你自己的立场。",
         "merge_hint": "把首轮立场归并为",
         "source_noun": "立场",
+        "merge_rule": ("中间轮的互评只能用来把已有立场收窄成更精确的条件式或拆成互斥的两条；"
+                       "不得引入任何席位都没提过的新论点。"),
+        "merge_closing": ("每条结论必须互斥、可判真假；\"现有证据不足以判断\"若要保留，就单独写成一条结论，"
+                          "不能塞进肯定结论的备注里。写完后只回复一行：CONCLUSIONS=<结论个数>。"
+                          "不要开始第 {vote_round} 轮。"),
+        "deliberate_hint": ("如果你要修改或收窄自己的立场，就在正文和元数据里写清改动与理由；本轮不投票。"),
+        "vote_hint": "投票前必须再做一次针对性检索，并在元数据里记录实际查询。",
+        "final_verdict": ("不得把未达 {bar} 的结论写成通过；票数分散在三条以上互斥结论上时，"
+                          "明确写\"本轮没有形成多数认可的结论\"，不要挑票数最高的一条充当共识。"),
+        "final_extra": "要写清各席位在中间轮里如何修改或收窄了自己的立场，以及投票前是否补做了检索。",
+    },
+    "solve": {
+        "purpose": "对给定问题讨论出可执行的解决方案",
+        "source_prefix": "D-",          # D = design，首轮是初步解法而不是提案
+        "source_id_field": "design_id",
+        "source_key": "source_designs",
+        "excluded_key": "excluded_designs",
+        "items_key": "solutions",
+        "item_id_prefix": "S",
+        "item_fields": ("title", "claim", "mechanism", "evidence", "preconditions",
+                        "main_risk", "source_designs"),
+        "urls_field": "evidence_urls",
+        "support_field": "adopt",
+        "score_fields": ("value_score", "soundness_score", "feasibility_score"),
+        "score_floor": {"value_score": 4, "soundness_score": 4, "feasibility_score": 3},
+        "ballot_choice": False,          # 一个问题可以有多个并行可用的方案
+        "preferred_field": "preferred_solution",
+        "approved_key": "adopted_solutions",
+        "catalog_file": "debate/solutions.json",
+        "template": "templates/solutions.example.json",
+        "prompts_dir": "prompts/solve",
+        "strict_majority": False,        # 采纳一个方案是要动手做的决定，门槛与 proposal 相同
+        "default_ratio": 0.8,
+        "noun": "方案",
+        "round1_hint": "严格按其中要求完成第一轮独立检索，并对 research_brief.md 里的问题提出你自己的初步解法。",
+        "merge_hint": "把首轮初步解法归并为",
+        "source_noun": "初步解法",
+        "merge_rule": ("中间轮的合并建议只能用于把已有初步解法组合、拆开或收窄；不得引入任何席位都没提过的新解法，"
+                       "并要写清合并了哪几轮、哪些席位的哪条主张。"),
+        "merge_closing": ("每条方案必须写清它在什么条件下成立、以及明确不解决什么；"
+                          "只在边角细节上不同的两条要合并成一条。写完后只回复一行：SOLUTIONS=<方案个数>。"
+                          "不要开始第 {vote_round} 轮。"),
+        "deliberate_hint": ("如果你认为两条相近解法应当合并、或自己的解法已被更好的覆盖，"
+                            "就在正文和元数据里写清；本轮不投票。"),
+        "vote_hint": ("投票前必须再做一次针对性检索，确认你最认同的方案在 research_brief.md 写明的约束下确实做得到，"
+                      "并在元数据里记录实际查询。"),
+        "final_verdict": ("不得把未达 {bar} 的方案写成已采纳；多条方案同时达到门槛时，写清各自适用的条件与代价，"
+                          "不要合成一条谁都没提过的\"综合方案\"。"),
+        "final_extra": ("要写清各方案在中间轮里被如何修改、合并或放弃，以及投票前是否补做了针对可行性的检索。"),
     },
 }
 
@@ -193,14 +255,14 @@ def chair_of(roles):
 def default_protocol(seats, mode="proposal"):
     """未提供 protocol.json（或未写 threshold）时的默认门槛，按模式取。
 
-    proposal 默认约八成：一个候选要多数席位都愿意先做实验才推进。
-    evaluate 默认严格多数：只要过半席位认同一个结论就算达成，因为这里问的是“大家怎么看”，
-    而不是“值不值得投入资源”。
+    strict_majority 的模式（evaluate）只要过半席位认同就算达成，因为那里问的是“大家怎么看”，
+    不是“值不值得投入资源”。proposal 与 solve 都要动手：一个候选要八成席位愿意先做才推进。
     """
-    if mode == "evaluate":
+    spec = MODES[mode]
+    if spec["strict_majority"]:
         numerator = seats // 2 + 1
     else:
-        numerator = max(1, round(seats * 0.8))
+        numerator = max(1, round(seats * spec["default_ratio"]))
     return {"mode": mode, "rounds": DEFAULT_ROUNDS,
             "threshold": {"numerator": numerator, "denominator": seats}}
 
@@ -210,8 +272,8 @@ def load_protocol(root, seats):
     protocol = read_json(path) if path.exists() else default_protocol(seats)
     mode = protocol.get("mode", "proposal")
     if mode not in MODES:
-        raise ValueError("protocol.json 的 mode 应为 " + " 或 ".join(sorted(MODES))
-                         + "：proposal 是找新方案，evaluate 是对给定问题取多数结论。")
+        raise ValueError("protocol.json 的 mode 应为 " + " / ".join(sorted(MODES))
+                         + "：proposal 找新方向，evaluate 对给定问题取多数结论，solve 对给定问题讨论解决方案。")
     rounds = protocol.get("rounds")
     if type(rounds) is not int or not MIN_ROUNDS <= rounds <= MAX_ROUNDS:
         raise ValueError(f"protocol.json 的 rounds 应为 {MIN_ROUNDS}–{MAX_ROUNDS} 的整数；"
@@ -394,6 +456,7 @@ def prompt_values(roles, protocol):
         "VOTE_ROUND_CN": chinese_number(protocol["rounds"]),
         # 以下按模式取值：提示词里不写死“候选/结论”“K01/C01”或文件名，换模式时同一份骨架仍然成立。
         "MODE": protocol.get("mode", "proposal"),
+        "MODE_PURPOSE": mode["purpose"],
         "NOUN": mode["noun"],
         "ITEM_PREFIX": mode["item_id_prefix"],
         "SOURCE_PREFIX": mode["source_prefix"],
@@ -411,9 +474,9 @@ def prompt_values(roles, protocol):
     }
 
 
-def make_config(root, mapping, search=True):
+def make_config(root, mapping, search=True, protocol=None):
     roles = load_roster(root)
-    protocol = load_protocol(root, len(roles))
+    protocol = protocol or load_protocol(root, len(roles))
     mode = mode_of(protocol)
     prompts = root / mode["prompts_dir"]
     values = prompt_values(roles, protocol)
@@ -421,6 +484,14 @@ def make_config(root, mapping, search=True):
     for name in ("member.md", "chair.md", "start.md", "round1.md", "deliberate.md", "vote.md"):
         if not (prompts / name).exists():
             raise ValueError("缺少 " + str(prompts / name) + "：该模式的提示词不完整，请检查安装目录。")
+    # member.md 与 chair.md 会被渲染进 system prompt；其余四个由席位在轮次中直接读磁盘，
+    # 程序不会替它们替换占位符，写进去就会原样落到提示词里。这里提前拦住。
+    for name in ("start.md", "round1.md", "deliberate.md", "vote.md"):
+        text = (prompts / name).read_text(encoding="utf-8-sig")
+        left = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", text)))
+        if left:
+            raise ValueError(str(prompts / name) + " 里还有未渲染的占位符 " + "、".join(left)
+                             + "：该文件由席位直接读取，只能写具体措辞。")
     common = render_template((prompts / "member.md").read_text(encoding="utf-8"), values)
     chair = render_template((prompts / "chair.md").read_text(encoding="utf-8"), values)
     chair_id = chair_of(roles)
@@ -451,38 +522,57 @@ def make_config(root, mapping, search=True):
     return config, locked
 
 
-def set_mode(root, mode):
-    """切换模式：改 protocol.json 的 mode，门槛按新模式重算（旧门槛是为另一个问题定的）。
+def protocol_for_mode(root, mode):
+    """按模式算出目标 protocol 内容，不落盘。setup 先拿它校验提示词，最后才写。
 
-    evaluate 与 proposal 的合理门槛不是同一个数：proposal 要求八成席位都想先做实验，
-    evaluate 只要求过半席位认同同一条结论。沿用旧阈值会让 evaluate 实际上得不出结论。
+    门槛算法按模式不同：proposal 与 solve 要八成席位都愿意动手，
+    evaluate 只要求过半席位认同同一条结论。沿用旧阈值会让新模式实际上得不出结论。
     但模式没变时不重算：那时手写的门槛是用户自己定的，重复 setup 不该把它抹掉。
     """
     if mode not in MODES:
-        raise ValueError("--mode 应为 " + " 或 ".join(sorted(MODES)) + "。")
+        raise ValueError("--mode 应为 " + " / ".join(sorted(MODES)) + "。")
     roles = load_roster(root)
     path = root / "protocol.json"
     current = read_json(path) if path.exists() else {}
     if current.get("mode", "proposal") == mode and "threshold" in current:
         return load_protocol(root, len(roles))
     rounds = current.get("rounds", DEFAULT_ROUNDS)
-    atomic_json(path, default_protocol(len(roles), mode) | {"rounds": rounds})
-    return read_json(path)
+    return default_protocol(len(roles), mode) | {"rounds": rounds}
 
 
-def setup(root, ids, supplied=None, interactive=False, search=True):
+def set_mode(root, mode):
+    """切换模式并写回 protocol.json；只给单独改模式的命令行用。"""
+    target = protocol_for_mode(root, mode)
+    atomic_json(root / "protocol.json", target)
+    return target
+
+
+def check_fresh(root):
     for filename in ("opencode.json", "opencode.jsonc", "roster.lock.json"):
         if (root / filename).exists():
             raise ValueError(f"{filename} 已存在。请在新解压的专用目录配置，避免覆盖已有 OpenCode 配置或辩论。")
+
+
+def setup(root, ids, supplied=None, interactive=False, search=True, mode=None):
+    # 先把所有能失败的事情做完，最后才写文件。否则 `setup --mode solve` 被拒或映射
+    # 校验失败时，目录里会留下新 protocol.json 与旧 opencode.json/roster.lock.json。
+    check_fresh(root)
     roles = load_roster(root)
-    protocol = load_protocol(root, len(roles))
     unknown = [r for r in roles if r.get("model") and r["model"] not in ids]
     if unknown:
         # 覆盖 ID 必须真实存在；猜一个不存在的 ID 只会在开跑后整席失败。
         raise ValueError("这些席位的 model 不在本机 opencode models 列表中："
                          + "、".join(f"{r['id']}={r['model']}" for r in unknown))
     mapping = resolve_models(ids, roles, supplied, interactive)
-    config, locked = make_config(root, mapping, search)
+    # 新模式只在这里算出来，不落盘：提示词缺失时 setup 会失败，而 protocol.json 应当保持原样。
+    protocol = protocol_for_mode(root, mode) if mode else load_protocol(root, len(roles))
+    config, locked = make_config(root, mapping, search, protocol)
+    if mode:
+        path = root / "protocol.json"
+        current = read_json(path) if path.exists() else {}
+        # 内容没变就不落盘，模式没变时手写门槛与该文件保持原样；额外键也一并保留。
+        if current.get("mode", "proposal") != protocol["mode"] or current.get("threshold") != protocol["threshold"]:
+            atomic_json(path, protocol | {k: v for k, v in current.items() if k not in protocol})
     atomic_json(root / "model_map.json", mapping)
     atomic_json(root / "roster.lock.json", {"seats": locked, "search": bool(search), "protocol": protocol})
     atomic_json(root / "opencode.json", config)
@@ -615,7 +705,7 @@ def packet_data(root):
     excluded_ids = set()
     for entry in excluded:
         if not entry.get("reason"):
-            raise ValueError("被排除的首轮" + mode["noun"] + "必须记录理由。")
+            raise ValueError("被排除的首轮" + mode["source_noun"] + "必须记录理由。")
         excluded_ids.add(entry.get(mode["source_id_field"]))
     sources = {mode["source_prefix"] + agent_id for agent_id in ids}
     if covered & excluded_ids or covered | excluded_ids != sources:
@@ -640,18 +730,17 @@ def render_packet(data, digest):
     text = "# 投票轮统一资料包\n\npacket_sha256: " + digest + "\n\n"
     text += ("投票门槛：{numerator}/{denominator}（分母为席位数，缺席不降低门槛）。\n\n"
              .format(**threshold))
+    text += (f"本轮是第 {rounds} 轮（最后一轮），投票对象是冻结后的{mode['noun']}。"
+             f"前 {rounds - 1} 轮的全部原文一并附上，供你核对每条{mode['noun']}是否被忠实转述。\n\n")
     if mode["ballot_choice"]:
-        text += (f"本轮是第 {rounds} 轮（最后一轮），投票对象是冻结后的{mode['noun']}。"
-                 f"前 {rounds - 1} 轮的全部原文一并附上，供你核对每条{mode['noun']}是否被忠实转述。\n\n")
         text += ("以下" + mode["noun"] + "定义和全部原始发言是本轮统一投票对象。"
                  "每个席位只能选一条" + mode["noun"] + "或 NONE，不能同时认两条；"
                  "投票后不得替换" + mode["noun"] + "。\n\n")
-        text += "## " + mode["noun"] + "目录\n\n"
     else:
-        text += (f"本轮是第 {rounds} 轮（最后一轮），投票对象是冻结候选。"
-                 f"前 {rounds - 1} 轮的全部原文一并附上，供你核对主张是否被忠实转述。\n\n")
-        text += "以下候选定义和全部原始发言是本轮统一投票对象。投票后不得替换方案。\n\n"
-        text += "## 候选目录\n\n"
+        text += ("以下" + mode["noun"] + "定义和全部原始发言是本轮统一投票对象。"
+                 "每个席位对每条" + mode["noun"] + "各投一票，可以同时认同多条；"
+                 "投票后不得替换" + mode["noun"] + "。\n\n")
+    text += "## " + mode["noun"] + "目录\n\n"
     text += "```json\n" + json.dumps(data["catalog"], ensure_ascii=False, indent=2) + "\n```\n\n"
     for number, speeches in data["deliberation"].items():
         for agent_id, record in speeches.items():
@@ -680,15 +769,15 @@ def freeze(root):
 
 def audit(root):
     data = packet_data(root)
+    mode = mode_of(data["protocol"])
     manifest = read_json(root / "debate/packet_manifest.json")
     digest = fingerprint(data)
     if digest != manifest.get("packet_sha256"):
-        raise ValueError("投票资料被改动；本轮票数不能用于修改后的方案。")
+        raise ValueError("投票资料被改动；本轮票数不能用于修改后的" + mode["noun"] + "。")
     packet = (root / "debate/vote_packet.md").read_text(encoding="utf-8-sig")
     if packet != render_packet(data, digest):
         raise ValueError("投票轮实际读取的资料包内容被改动。")
     ids = [r["id"] for r in data["roster"]]
-    mode = mode_of(data["protocol"])
     noun = mode["noun"]
     candidates = manifest["candidate_ids"]
     if manifest.get("mode", "proposal") != data["protocol"].get("mode", "proposal"):
@@ -742,15 +831,20 @@ def audit(root):
                                      + ("（" + "、".join(low) + " 未达下限）" if low else "") + "。")
                 supported.add(vote["candidate_id"])
             rows.append({"agent_id": agent_id, **vote})
-        if mode["ballot_choice"]:
+        if mode["ballot_choice"] and len(supported) > 1:
             # evaluate 是单选题：每个席位只认一个结论，否则同一个人可以同时支持互斥的两条，
             # “多数人认可的结论”就没法定义。
-            if len(supported) > 1:
-                raise ValueError(agent_id + " 同时认可了多个" + noun
-                                 + "（" + "、".join(sorted(supported)) + "）；本轮只能在一条" + noun
-                                 + "与 NONE 之间选一个。")
-        elif meta.get(mode["preferred_field"]) not in supported | {"NONE"}:
-            raise ValueError(agent_id + " 的首选必须是自己推荐的候选或 NONE。")
+            raise ValueError(agent_id + " 同时认可了多个" + noun
+                             + "（" + "、".join(sorted(supported)) + "）；本轮只能在一条" + noun
+                             + "与 NONE 之间选一个。")
+        # 两种模式都查：首选必须与自己的票一致。单一手写字段不参与计票，但它是下一版建议
+        # 唯一的结构化入口，和 endorse 矛盾时不报错，报告就会引用一个当事人并未投过的选择。
+        # 有认可项时首选必须是其中之一；没有认可项时只能写 NONE（写成某条等于默认推荐它）。
+        preferred = meta.get(mode["preferred_field"])
+        if preferred not in (supported or {"NONE"}):
+            raise ValueError(agent_id + " 的 " + mode["preferred_field"] + " 必须是自己"
+                             + ("认可的那条" if mode["ballot_choice"] else "推荐的") + noun
+                             + ("或 NONE。" if supported else "，没有认可任何" + noun + "时只能写 NONE。"))
     counts = []
     seats = len(ids)
     threshold = data["protocol"]["threshold"]
@@ -782,7 +876,7 @@ def audit(root):
               "formal_statements": data["protocol"]["rounds"] * seats,
               "protocol": data["protocol"],
               "retrieval_partial_seats": data["retrieval_partial_seats"],
-              "candidates": counts, mode["approved_key"]: approved,
+              mode["items_key"]: counts, mode["approved_key"]: approved,
               "scope": "只检查记录、版本与票数，不证明内容真实、新意成立或中转背后的实际模型身份。"}
     atomic_json(root / "debate/audit.json", result)
     out = io.StringIO(newline="")
@@ -904,7 +998,8 @@ def main():
                          help="是否启用 websearch。off 时权限里 deny，成员改走 webfetch；"
                               "没有搜索 provider 凭据时应保持 off。默认 off。")
     install.add_argument("--mode", choices=sorted(MODES),
-                         help="proposal=找值得做的新方向（默认）；evaluate=对给定问题取多数认可的结论。"
+                         help="proposal=找值得做的新方向（默认）；evaluate=对给定问题取多数认可的结论；"
+                              "solve=对给定问题讨论出可执行的解法。"
                               "会写进 protocol.json，并按该模式重算默认门槛。")
     listing = sub.add_parser("models")
     listing.add_argument("--inventory", type=Path)
@@ -925,10 +1020,8 @@ def main():
                                  ensure_ascii=False, indent=2))
             else:
                 supplied = read_json(args.mapping) if args.mapping else None
-                if args.mode:
-                    set_mode(ROOT, args.mode)
                 seats = setup(ROOT, available, supplied, not args.non_interactive and sys.stdin.isatty(),
-                              args.search == "on")
+                              args.search == "on", args.mode)
                 protocol = read_json(ROOT / "roster.lock.json")["protocol"]
                 print(json.dumps({"configured": True, "search": args.search,
                                   "mode": protocol.get("mode", "proposal"),

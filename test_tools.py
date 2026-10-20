@@ -1,12 +1,16 @@
 """Offline counterfactual tests; all model IDs, speeches and URLs below are synthetic."""
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import unittest
 
 import debate_tools as d
+import run_debate
 
 
 FAKE_IDS = ["mock/family-a", "mock/family-b", "mock/family-c",
@@ -517,8 +521,8 @@ class EvaluateTests(unittest.TestCase):
         result = d.audit(self.root)
         self.assertEqual(result["mode"], "evaluate")
         self.assertEqual(result["formal_statements"], 30)
-        self.assertEqual(result["candidates"][0]["support"], 6)
-        self.assertEqual(result["candidates"][0]["threshold"], "6/10")
+        self.assertEqual(result["conclusions"][0]["support"], 6)
+        self.assertEqual(result["conclusions"][0]["threshold"], "6/10")
         self.assertEqual(result["adopted_conclusions"], ["C01"])
         self.assertNotIn("approved_candidates", result)
         header = (self.root / "debate/votes.csv").read_text(encoding="utf-8-sig").splitlines()[0]
@@ -531,8 +535,8 @@ class EvaluateTests(unittest.TestCase):
         self.change_ballot("a06", lambda m: (m["votes"][0].update(endorse=False, confidence=2),
                                              m.update(preferred_conclusion="NONE")))
         result = d.audit(self.root)
-        self.assertEqual(result["candidates"][0]["support"], 5)
-        self.assertFalse(result["candidates"][0]["threshold_met"])
+        self.assertEqual(result["conclusions"][0]["support"], 5)
+        self.assertFalse(result["conclusions"][0]["threshold_met"])
         self.assertEqual(result["adopted_conclusions"], [])
 
     def test_single_choice_ballot_rejects_two_endorsements(self):
@@ -564,6 +568,16 @@ class EvaluateTests(unittest.TestCase):
         self.change_ballot("a02", lambda m: m["votes"][0].update(confidence=3))
         with self.assertRaises(ValueError):
             d.audit(self.root)
+
+    def test_preferred_must_match_the_single_endorsed_conclusion(self):
+        # 单选票只认 endorse，但 preferred_conclusion 是下一版建议的入口；
+        # 两者矛盾时不能照原票计票，否则报告会引用当事人没投过的选择。
+        self.prepared()
+        self.endorsements()
+        self.change_ballot("a01", lambda m: m.update(preferred_conclusion="NONE"))
+        with self.assertRaises(ValueError) as caught:
+            d.audit(self.root)
+        self.assertIn("preferred_conclusion", str(caught.exception))
 
     def test_missing_conclusions_catalog_fails_freeze_with_mode_specific_message(self):
         self.roles = d.setup(self.root, FAKE_IDS)
@@ -606,11 +620,364 @@ class EvaluateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             d.load_protocol(self.root, 10)
 
+    def test_setup_with_mode_leaves_protocol_untouched_when_config_exists(self):
+        # 已配置过的目录：setup 必须整体拒绝，不能先把 protocol.json 改成新模式再报错。
+        d.setup(self.root, FAKE_IDS)
+        before = {"mode": "proposal", "rounds": 3, "threshold": {"numerator": 8, "denominator": 10}}
+        d.atomic_json(self.root / "protocol.json", before)
+        with self.assertRaises(ValueError) as caught:
+            d.setup(self.root, FAKE_IDS, mode="evaluate")
+        self.assertIn("opencode.json", str(caught.exception))
+        self.assertEqual(d.read_json(self.root / "protocol.json"), before)
+
+    def test_setup_with_mode_leaves_protocol_untouched_when_mapping_fails(self):
+        # 映射校验失败也必须先失败：不能留下“模式已改、配置未生成”的半截目录。
+        before = {"mode": "proposal", "rounds": 3, "threshold": {"numerator": 8, "denominator": 10}}
+        d.atomic_json(self.root / "protocol.json", before)
+        with self.assertRaises(ValueError):
+            d.setup(self.root, FAKE_IDS, {"family_a": "mock/not-in-inventory"}, mode="evaluate")
+        self.assertEqual(d.read_json(self.root / "protocol.json"), before)
+        self.assertFalse((self.root / "opencode.json").exists())
+
+    def test_setup_with_mode_leaves_protocol_untouched_when_prompt_missing(self):
+        # 提示词缺失要在写 protocol.json 之前失败：否则目录会变成“模式已是 solve、配置没生成”。
+        before = {"mode": "proposal", "rounds": 3, "threshold": {"numerator": 8, "denominator": 10}}
+        d.atomic_json(self.root / "protocol.json", before)
+        (self.root / "prompts/solve/vote.md").unlink()
+        with self.assertRaises(ValueError) as caught:
+            d.setup(self.root, FAKE_IDS, mode="solve")
+        self.assertIn("vote.md", str(caught.exception))
+        self.assertEqual(d.read_json(self.root / "protocol.json"), before)
+        self.assertFalse((self.root / "opencode.json").exists())
+
+    def test_setup_with_unchanged_mode_keeps_handwritten_threshold_bytes(self):
+        # 模式没变时，手写门槛与多余键都不该被重写。
+        path = self.root / "protocol.json"
+        original = ("{\n  \"mode\": \"proposal\",\n  \"rounds\": 2,\n"
+                    "  \"threshold\": {\"numerator\": 7, \"denominator\": 10},\n  \"note\": \"手写\"\n}\n")
+        path.write_text(original, encoding="utf-8")
+        d.setup(self.root, FAKE_IDS, mode="proposal")
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
     def test_proposal_default_mode_when_field_absent(self):
         d.atomic_json(self.root / "protocol.json", {"rounds": 3})
         protocol = d.load_protocol(self.root, 10)
         self.assertEqual(protocol["mode"], "proposal")
         self.assertEqual(protocol["threshold"], {"numerator": 8, "denominator": 10})
+
+
+class SolveTests(unittest.TestCase):
+    """solve 模式：对同一个问题讨论解法，多选投票，八成门槛（十席时 8/10）。
+
+    与 evaluate 的两处关键差别都锁在这里：票不是单选（一个问题可以同时采纳
+    多条并行可用的方案），并且已有工作不是淘汰理由，所以分里没有新意项。
+    同样不继承 ToolsTests：那批用例锁的是 proposal 的字段名与候选语义。
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
+        shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
+        d.atomic_json(self.root / "protocol.json", {"mode": "solve", "rounds": 3})
+        (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def write_designs(self):
+        for role in self.roles:
+            aid = role["id"]
+            meta = {"agent_id": aid, "round": 1, "design_id": "D-" + aid,
+                    "title": "Synthetic design " + aid,
+                    "evidence_urls": ["https://example.invalid/test-" + str(i) for i in range(3)],
+                    "retrieval_status": "completed"}
+            d.atomic_text(self.root / "debate/round1" / (aid + ".md"),
+                          "Synthetic offline speech only.\n```json\n" + json.dumps(meta) + "\n```\n")
+
+    def vote_round(self):
+        return d.load_protocol(self.root, len(self.roles))["rounds"]
+
+    def write_deliberation(self, number):
+        ids = [r["id"] for r in self.roles]
+        for aid in ids:
+            other = [x for x in ids if x != aid][:2]
+            meta = {"agent_id": aid, "round": number,
+                    "searched_queries": ["synthetic query one", "synthetic query two"],
+                    "evidence_urls": ["https://example.invalid/evidence"],
+                    "responses": [{"to_agent": x, "stance": "modify", "claim": "Synthetic response"}
+                                  for x in other],
+                    "merges": [], "withdraws": []}
+            d.atomic_text(self.root / f"debate/round{number}" / (aid + ".md"),
+                          "Synthetic offline deliberation.\n```json\n" + json.dumps(meta) + "\n```\n")
+
+    def write_catalog(self, split=None):
+        """split: 方案 ID -> 该方案覆盖哪些首轮解法。省略时全部归入第一条。"""
+        if split is None:
+            split = {"S01": ["D-" + r["id"] for r in self.roles]}
+        items = [{"id": sid, "title": "Synthetic solution " + sid,
+                  "claim": "mock", "source_designs": list(split[sid]),
+                  "mechanism": "mock", "evidence": ["mock"],
+                  "preconditions": "mock", "main_risk": "mock"}
+                 for sid in split]
+        d.atomic_json(self.root / "debate/solutions.json",
+                      {"solutions": items, "excluded_designs": []})
+
+    def prepared(self, split=None):
+        self.roles = d.setup(self.root, FAKE_IDS)
+        self.write_designs()
+        for number in range(2, self.vote_round()):
+            self.write_deliberation(number)
+        self.write_catalog(split)
+        self.manifest = d.freeze(self.root)
+
+    def score(self, adopt):
+        return {"value_score": 4 if adopt else 3, "soundness_score": 4,
+                "feasibility_score": 4 if adopt else 3}
+
+    def ballots(self, adopted=("S01",), abstain_at=None):
+        """adopted: 前 required 个席位采纳的方案；abstain_at: 该序号的席位改为不采纳。"""
+        ids = [r["id"] for r in self.roles]
+        number = self.vote_round()
+        required = d.load_protocol(self.root, len(ids))["threshold"]["numerator"]
+        catalog = d.read_json(self.root / "debate/solutions.json")["solutions"]
+        for i, aid in enumerate(ids):
+            other = [x for x in ids if x != aid][:2]
+            supporting = i < required and i != abstain_at
+            votes = []
+            for item in catalog:
+                take = supporting and item["id"] in adopted
+                votes.append({"candidate_id": item["id"], "adopt": take,
+                              "unresolved_fatal_objection": False,
+                              "reason": "Synthetic test judgment, not a research claim.",
+                              "evidence_urls": ["https://example.invalid/mock-paper"],
+                              **self.score(take)})
+            preferred = next((v["candidate_id"] for v in votes if v["adopt"]), "NONE")
+            meta = {"agent_id": aid, "round": number, "packet_sha256": self.manifest["packet_sha256"],
+                    "searched_queries": ["synthetic vote query one", "synthetic vote query two"],
+                    "responses": [{"to_agent": x, "stance": "modify", "claim": "Synthetic response"} for x in other],
+                    "votes": votes, "preferred_solution": preferred}
+            d.atomic_text(self.root / f"debate/round{number}" / (aid + ".md"),
+                          "Synthetic test ballot.\n```json\n" + json.dumps(meta) + "\n```\n")
+
+    def change_ballot(self, aid, fn):
+        path = self.root / f"debate/round{self.vote_round()}" / (aid + ".md")
+        meta = d.metadata(path.read_text(encoding="utf-8"))
+        fn(meta)
+        d.atomic_text(path, "```json\n" + json.dumps(meta) + "\n```\n")
+
+    def test_solve_default_threshold_is_eighty_percent(self):
+        d.setup(self.root, FAKE_IDS)
+        lock = d.read_json(self.root / "roster.lock.json")
+        self.assertEqual(lock["protocol"]["mode"], "solve")
+        self.assertEqual(lock["protocol"]["threshold"], {"numerator": 8, "denominator": 10})
+
+    def test_eight_of_ten_adopts_the_solution(self):
+        self.prepared()
+        self.ballots()
+        result = d.audit(self.root)
+        self.assertEqual(result["mode"], "solve")
+        self.assertEqual(result["formal_statements"], 30)
+        self.assertEqual(result["solutions"][0]["support"], 8)
+        self.assertEqual(result["solutions"][0]["threshold"], "8/10")
+        self.assertEqual(result["adopted_solutions"], ["S01"])
+        self.assertNotIn("approved_candidates", result)
+        header = (self.root / "debate/votes.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+        for column in ("adopt", "value_score", "soundness_score", "feasibility_score"):
+            self.assertIn(column, header)
+
+    def test_seven_of_ten_does_not_adopt(self):
+        self.prepared()
+        self.ballots(abstain_at=7)
+        result = d.audit(self.root)
+        self.assertEqual(result["solutions"][0]["support"], 7)
+        self.assertFalse(result["solutions"][0]["threshold_met"])
+        self.assertEqual(result["adopted_solutions"], [])
+
+    def test_two_solutions_can_be_adopted_in_the_same_ballot(self):
+        # 与 evaluate 的本质区别：两个并行可用的方案各自过门槛，都进 adopted_solutions。
+        self.roles = d.load_roster(self.root)
+        self.prepared({"S01": ["D-" + r["id"] for r in self.roles[:5]],
+                       "S02": ["D-" + r["id"] for r in self.roles[5:]]})
+        self.ballots(adopted=("S01", "S02"))
+        result = d.audit(self.root)
+        self.assertEqual([s["support"] for s in result["solutions"]], [8, 8])
+        self.assertEqual(result["adopted_solutions"], ["S01", "S02"])
+
+    def test_adopt_requires_score_floors(self):
+        self.prepared()
+        self.ballots()
+        self.change_ballot("a02", lambda m: m["votes"][0].update(feasibility_score=2))
+        with self.assertRaises(ValueError) as caught:
+            d.audit(self.root)
+        self.assertIn("feasibility_score", str(caught.exception))
+
+    def test_preferred_solution_must_be_one_of_the_adopted(self):
+        self.roles = d.load_roster(self.root)
+        self.prepared({"S01": ["D-" + r["id"] for r in self.roles[:5]],
+                       "S02": ["D-" + r["id"] for r in self.roles[5:]]})
+        self.ballots(adopted=("S01",))
+        self.change_ballot("a01", lambda m: m.update(preferred_solution="S02"))
+        with self.assertRaises(ValueError) as caught:
+            d.audit(self.root)
+        self.assertIn("preferred_solution", str(caught.exception))
+
+    def test_missing_solutions_catalog_fails_freeze_with_mode_specific_message(self):
+        self.roles = d.setup(self.root, FAKE_IDS)
+        self.write_designs()
+        self.write_deliberation(2)
+        d.atomic_json(self.root / "debate/candidates.json", {"candidates": []})
+        with self.assertRaises(ValueError) as caught:
+            d.freeze(self.root)
+        self.assertIn("debate/solutions.json", str(caught.exception))
+
+    def test_proposal_shaped_ballot_is_rejected_in_solve(self):
+        # 旧模式的票（recommend/novelty_score）在 solve 下必须被拒，而不是静默当成不采纳。
+        self.prepared()
+        self.ballots()
+        self.change_ballot("a03", lambda m: m["votes"][0].pop("soundness_score"))
+        with self.assertRaises(ValueError):
+            d.audit(self.root)
+
+    def test_mode_cannot_change_after_freeze(self):
+        self.prepared()
+        self.ballots()
+        path = self.root / "protocol.json"
+        protocol = d.read_json(path)
+        protocol["mode"] = "evaluate"
+        d.atomic_json(path, protocol)
+        with self.assertRaises(ValueError):
+            d.audit(self.root)
+
+    def test_set_mode_recomputes_threshold_between_modes(self):
+        (self.root / "protocol.json").write_text(
+            json.dumps({"rounds": 2, "threshold": {"numerator": 6, "denominator": 10}}), encoding="utf-8")
+        self.assertEqual(d.set_mode(self.root, "solve")["threshold"],
+                         {"numerator": 8, "denominator": 10})
+        self.assertEqual(d.set_mode(self.root, "evaluate")["threshold"],
+                         {"numerator": 6, "denominator": 10})
+
+    def test_rendered_packet_uses_solve_wording(self):
+        self.prepared()
+        packet = (self.root / "debate/vote_packet.md").read_text(encoding="utf-8")
+        self.assertIn("方案目录", packet)
+        self.assertIn("可以同时认同多条", packet)
+        self.assertNotIn("候选目录", packet)
+
+    def test_runner_audit_prints_mode_specific_key(self):
+        # run_debate.audit() 曾写死 result["candidates"]，solve 下直接 KeyError。
+        self.prepared()
+        self.ballots()
+        previous = run_debate.ROOT
+        run_debate.ROOT = self.root
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                run_debate.audit()
+        finally:
+            run_debate.ROOT = previous
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["approved"], ["S01"])
+        self.assertIn("solutions", printed)
+        self.assertNotIn("candidates", printed)
+
+    def test_runner_repair_prompt_matches_the_round(self):
+        # 首轮没有互评与票：修复提示词不能要求席位去改 responses/votes。
+        self.prepared()
+        self.ballots()
+        captured = []
+        previous_root, previous_run = run_debate.ROOT, run_debate.run_agent
+        run_debate.ROOT = self.root
+
+        def fake(_agent, prompt, _tag):
+            captured.append(prompt)
+            # repair 只改写元数据块；这里原样返回，足够检查提示词。
+            return "```json\n" + json.dumps(d.metadata(self.round1_text)) + "\n```\n"
+
+        self.round1_text = (self.root / "debate/round1" / "a01.md").read_text(encoding="utf-8")
+        vote_text = (self.root / f"debate/round{self.vote_round()}" / "a01.md").read_text(encoding="utf-8")
+        run_debate.run_agent = fake
+        try:
+            run_debate.repair("a01", 1, "synthetic problem")
+            first = captured[-1]
+            self.round1_text = vote_text
+            run_debate.repair("a01", self.vote_round(), "synthetic problem")
+            last = captured[-1]
+        finally:
+            run_debate.ROOT, run_debate.run_agent = previous_root, previous_run
+        self.assertNotIn("responses", first)
+        self.assertNotIn("votes", first)
+        self.assertIn("本轮元数据", first)
+        self.assertIn("responses", last)
+        self.assertIn("votes", last)
+        self.assertIn("投票轮元数据", last)
+
+
+class PromptRenderTests(unittest.TestCase):
+    """席位直接读磁盘的四个提示词不经渲染，占位符会原样落到提示词里。
+
+    member.md 与 chair.md 会被 render_template 处理并写进 system prompt；
+    其余四个由席位在轮次中按路径自行读取，所以只能写具体措辞。
+    """
+
+    RUNTIME_FILES = ("start.md", "round1.md", "deliberate.md", "vote.md")
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
+        shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
+        (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_runtime_prompts_have_no_template_tokens(self):
+        # 三个模式全查：solve 最先犯这个错，evaluate 的 vote.md 也一度写进 token。
+        for mode in sorted(d.MODES):
+            for name in self.RUNTIME_FILES:
+                text = (self.root / "prompts" / mode / name).read_text(encoding="utf-8")
+                self.assertIsNone(re.search(r"\{\{[A-Z_]+\}\}", text),
+                                  msg=f"{mode}/{name} 含未渲染占位符")
+
+    def test_make_config_rejects_token_in_runtime_prompt(self):
+        # 守卫要在写任何文件之前失败，否则会留下半截配置。
+        path = self.root / "prompts/solve/vote.md"
+        path.write_text(path.read_text(encoding="utf-8") + "\n{{SCORE_FLOOR_TEXT}}\n", encoding="utf-8")
+        d.atomic_json(self.root / "protocol.json", {"mode": "solve", "rounds": 3})
+        with self.assertRaises(ValueError) as caught:
+            d.setup(self.root, FAKE_IDS)
+        message = str(caught.exception)
+        self.assertIn("vote.md", message)
+        self.assertIn("SCORE_FLOOR_TEXT", message)
+        self.assertFalse((self.root / "opencode.json").exists())
+
+    def test_solve_prompts_name_the_real_fields(self):
+        # “结论”这类普通词在 solve 里也合法（指某篇文献的结论），只查属于别的模式的字段名与文件名。
+        foreign = ("recommend", "novelty_score", "endorse", "confidence",
+                   "approved_candidates", "adopted_conclusions",
+                   "candidates.json", "conclusions.json")
+        for name in self.RUNTIME_FILES:
+            text = (self.root / "prompts/solve" / name).read_text(encoding="utf-8")
+            self.assertNotIn("候选", text, msg=f"solve/{name} 出现 proposal 的词")
+            for word in foreign:
+                self.assertNotIn(word, text, msg=f"solve/{name} 引用了别的模式的 {word}")
+        vote = (self.root / "prompts/solve/vote.md").read_text(encoding="utf-8")
+        for field in ("evidence_urls", "preferred_solution", "value_score",
+                      "soundness_score", "feasibility_score", "S01"):
+            self.assertIn(field, vote)
+        round1 = (self.root / "prompts/solve/round1.md").read_text(encoding="utf-8")
+        self.assertIn("design_id", round1)
+        self.assertIn("D-", round1)
+
+    def test_solve_vote_prompt_literals_match_score_floor(self):
+        # 这个文件不经渲染，分数线下限只能手写；改了 MODES 却忘了改提示词就会静默不一致。
+        text = (self.root / "prompts/solve/vote.md").read_text(encoding="utf-8")
+        for field, floor in d.MODES["solve"]["score_floor"].items():
+            self.assertIn(f"{field} 至少 {floor} 分", text)
+        self.assertIn(d.MODES["solve"]["urls_field"], text)
+        self.assertIn(d.MODES["solve"]["preferred_field"], text)
+        self.assertIn(d.MODES["solve"]["item_id_prefix"] + "01", text)
+        self.assertIn(d.MODES["solve"]["item_id_prefix"] + "02", text)
 
 
 if __name__ == "__main__":

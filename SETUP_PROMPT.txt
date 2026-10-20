@@ -2,7 +2,7 @@
 
 0. `research_brief.md` 是本次要讨论的题目背景。若它只有示例内容、或根本不存在，先复制 `research_brief.example.md` 为 `research_brief.md`，然后**停下来问我题目**：需要我提供机制段、已被占满的区域、已知负面证据和文献线索。不要自己编造研究背景，也不要替我选题目。若我已在 `research_brief.md` 里写好内容，直接沿用。
 
-   同时确认模式：`protocol.json` 的 `mode` 为 `proposal`（找值得做的新方向，默认）还是 `evaluate`（对给定的一个问题取多数认可的结论）。用 `evaluate` 时，`research_brief.md` 里必须有**一个能被判真假的具体问题**，否则先问我；宽泛的主题不能当问题用。切换用 `python debate_tools.py setup --mode evaluate`（会按该模式重算默认门槛并保留 rounds），也可以直接改 `protocol.json` 的 `mode`。
+   同时确认模式：`protocol.json` 的 `mode` 为 `proposal`（找值得做的新方向，默认）、`evaluate`（对给定的一个问题取多数认可的结论）还是 `solve`（对给定的问题讨论出能执行的解法，不要求新意）。用 `evaluate` 时，`research_brief.md` 里必须有**一个能被判真假的具体问题**；用 `solve` 时，必须写清可用资源、时间与权限边界，以及什么算做完，否则先问我；宽泛的主题不能当问题用。切换用 `python debate_tools.py setup --mode evaluate`（或 `--mode solve`，会按该模式重算默认门槛并保留 rounds），也可以直接改 `protocol.json` 的 `mode`。
 
 1. 使用本机已经安装的 OpenCode 和已经配置好的供应商。运行 opencode models 取得真实的 provider/model ID，不读取或展示 API key，不另建供应商。若命令不在 PATH，尝试定位已安装 CLI 的完整路径，给脚本 models/setup 加 --opencode "实际CLI路径"；也可以用完整路径的 CLI 导出模型列表后走 --inventory。不要猜模型 ID。
 2. `roles.json` 是席位表，随包默认是六系列十席位：A 系列两席、B 系列两席、C 系列两席、D 系列两席、E 系列一席、F 系列一席。其中带 `"chair": true` 的 a05（C 系列）兼任主持，agent 名为 debate-chair；其余席位是 subagent 模式的独立 Agent（debate-<id>），不增加额外投票席位。系列名只是占位符，实际对应哪个模型由 model_map.json 决定。若用户改过 roles.json，以文件为准：席位数、系列与主持都由它决定，不要按这里的默认数字写死。

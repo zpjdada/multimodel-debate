@@ -1,10 +1,30 @@
 # 本地验证记录
 
-2026-10-20 双模式改造：`proposal` 与 `evaluate` 共用同一套轮次、冻结、哈希与审核，只有"一轮产出什么"和"票怎么算"不同。模式写在 `protocol.json` 的 `mode`，默认 `proposal`；`evaluate` 用 `S-` 立场编号、`debate/conclusions.json`（`C01`…）、`endorse`/`confidence`、单选票与严格多数门槛（十席 6/10）。离线测试增至 42 项（`python -B -m unittest test_tools`，`ToolsTests` 32 项 + `EvaluateTests` 10 项），全部通过。
+2026-10-20 三模式改造：`proposal`、`evaluate` 与 `solve` 共用同一套轮次、冻结、哈希与审核，只有"一轮产出什么"和"票怎么算"不同。模式写在 `protocol.json` 的 `mode`，默认 `proposal`。
 
-`EvaluateTests` 覆盖：默认门槛为严格多数、6/10 采纳与 5/10 不采纳、`endorse` 需要置信度下限与证据 URL、一个席位认同两条互斥结论被拒、写错目录文件名（`candidates.json` ↔ `conclusions.json`）时的报错指对文件、冻结后改模式被拒、`set_mode` 按新模式重算门槛并保留 `rounds`、未写 `threshold` 时按模式取默认、未知模式被拒。
+- `proposal`：找新方向，要新意。`P-` 提案编号、`debate/candidates.json`（`K01`…）、`recommend` 与 novelty/value/feasibility 三项评分，多选票，门槛八成（十席 8/10）。
+- `evaluate`：对给定问题取多数结论。`S-` 立场编号、`debate/conclusions.json`（`C01`…）、`endorse`/`confidence`，单选票，门槛严格多数（十席 6/10）。
+- `solve`：对给定问题讨论可执行方案，不要求新意。`D-` 初步解法编号、`debate/solutions.json`（`S01`…）、`adopt` 与 value/soundness/feasibility 三项评分（下限 4/4/3），多选票，门槛八成（十席 8/10）。
 
-模式与门槛一起进入 `packet_sha256`，并在 `packet_manifest.json` 与 `roster.lock.json` 里各留一份；`audit` 检查两者与当前 `protocol.json` 一致。`prompts/` 下按模式分为两套完整提示词（各 6 个文件），`setup` 只读当前模式那一套，缺文件时直接报错而不是退回另一套。
+各模式随轮次变化的指令措辞（归并规则与收尾、中间轮、投票轮、终稿）已从 `run_debate.py` 的 `if m is d.MODES[...]` 分支搬进 `MODES` 表；加模式不再需要改运行器的分支，此前第三模式会静默落回 proposal 话术。离线测试增至 65 项（`python -B -m unittest test_tools`，`ToolsTests` 32 项 + `EvaluateTests` 16 项 + `SolveTests` 13 项 + `PromptRenderTests` 4 项），全部通过。
+
+本轮缺陷排查修了五处会实际出错的地方：
+
+- `run_debate.audit()` 写死 `result["candidates"]`，`solve` 下直接 `KeyError`；改为按 `mode["items_key"]` 取。
+- `setup --mode` 先把 `protocol.json` 改成新模式，再由 `make_config` 检查提示词；提示词缺失时会留下"模式已改、配置未生成"的目录。现在先算目标 protocol 并校验提示词，最后才落盘，模式未变时不重写文件。
+- `solve` 的 `start.md`、`round1.md`、`deliberate.md`、`vote.md` 由席位直接读磁盘，不经 `render_template`，其中残留的 `{{NOUN}}`、`{{SCORE_FLOOR_TEXT}}`、`{{URLS_FIELD}}` 等会原样进入提示词（`solve` 实质不可用）；现已全部改为具体措辞，并在 `make_config` 里加守卫拒绝这类占位符。
+- `repair` 的提示词无条件要求席位修 `responses` 与 `votes`，第 1 轮并没有这两个字段，会让模型凭空造出互评；现按轮次分开，首轮只提 `searched_queries`。
+- `audit` 的篡改报错、`freeze` 的排除理由报错、`repair` 的"投票轮"措辞都写死了单一模式或单一轮次；已按模式与轮次取值。
+
+`PromptRenderTests` 覆盖：三模式四个运行时提示词无残留占位符、守卫在写文件前拒绝 token、`solve` 提示词不引用其他模式的字段名、`solve/vote.md` 的字面分数下限与 `MODES["solve"]["score_floor"]` 一致。
+
+`SolveTests` 覆盖：默认门槛为八成、8/10 采纳与 7/10 不采纳、同一张票里两条方案同时被采纳、`adopt` 需要 `value_score`/`soundness_score`/`feasibility_score` 下限与证据 URL、`preferred_solution` 必须是本人采纳之一、写错目录文件名时的报错指向 `debate/solutions.json`、缺 `soundness_score` 的旧形状票被拒、冻结后改模式被拒、`set_mode` 在 `solve` 与 `evaluate` 之间重算 8/10 ↔ 6/10、`vote_packet.md` 用"方案目录"而非候选措辞、`run_debate.audit()` 打印 `solutions` 键、`repair` 提示词按轮次只提该轮存在的字段。
+
+2026-10-20 双模式改造：`proposal` 与 `evaluate` 共用同一套轮次、冻结、哈希与审核，只有"一轮产出什么"和"票怎么算"不同。模式写在 `protocol.json` 的 `mode`，默认 `proposal`；`evaluate` 用 `S-` 立场编号、`debate/conclusions.json`（`C01`…）、`endorse`/`confidence`、单选票与严格多数门槛（十席 6/10）。离线测试增至 46 项（`python -B -m unittest test_tools`，`ToolsTests` 32 项 + `EvaluateTests` 14 项），全部通过。
+
+`EvaluateTests` 覆盖：默认门槛为严格多数、6/10 采纳与 5/10 不采纳、`endorse` 需要置信度下限与证据 URL、一个席位认同两条互斥结论被拒、`preferred_conclusion` 与 `endorse` 矛盾被拒、写错目录文件名（`candidates.json` ↔ `conclusions.json`）时的报错指对文件、冻结后改模式被拒、`set_mode` 按新模式重算门槛并保留 `rounds`、未写 `threshold` 时按模式取默认、未知模式被拒；`setup` 在目录已配置或模型映射失败时整体拒绝，不改动 `protocol.json`。
+
+模式与门槛一起进入 `packet_sha256`，并在 `packet_manifest.json` 与 `roster.lock.json` 里各留一份；`audit` 检查两者与当前 `protocol.json` 一致。`prompts/` 下按模式分为三套完整提示词（各 6 个文件），`setup` 只读当前模式那一套，缺文件时直接报错而不是退回另一套；其中 `member.md` 与 `chair.md` 会渲染后写进 system prompt，另四个由席位直接读磁盘，`setup` 会拒绝仍带占位符的那四个。
 
 2026-10-20 离线测试增至 32 项，全部通过（`python -B -m unittest test_tools`）。新增席位级 `model` 覆盖（优先于系列映射、必须存在于模型列表、写进 `roster.lock.json`）、系列全部被覆盖时跳过 `model_map.json`、`audit.json` 的逐系列诊断 `family_breakdown`。随包文档与测试中的模型名已改为占位系列名 `family_a`–`family_f` 与 `mock/family-a`–`mock/family-f`；真实运行记录 `debate/audit.json`、`debate/votes.csv` 保持原样，不改写。
 
@@ -26,6 +46,7 @@
 - 检索状态为 `blocked` 的席位不能进入有效投票阶段；`partial` 允许入档，但必须出现在 `audit.json` 的 `retrieval_partial_seats` 与目录文件的 `scope_note` 里，且重复 `freeze` 不叠加、不改变 packet 哈希；席位在冻结前补齐检索后，过期名单会被清除。
 - 中间轮与投票轮都必须记录至少两条实际检索过的查询；缺失时 `freeze` 或 `audit` 拒绝。
 - `evaluate` 模式下，一个席位同时认同两条互斥结论会被 `audit` 拒绝：单选才有"多数认可的结论"可言。
+- `solve` 模式下，同一张票里两条方案可以同时被采纳（一个问题可以有并行可用的做法），但它们必须各自写清适用条件；`adopt`=true 仍要过 4/4/3 的下限并附证据 URL。
 - 冻结后再改 `mode` 会被 `packet_sha256` 与 manifest 的一致性检查拦住。
 
 模拟模型 ID、发言、候选和 example.invalid 资料只存在于测试临时目录中；不是科研结果，不会被装成真实讨论输出。

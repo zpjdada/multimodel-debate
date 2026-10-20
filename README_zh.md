@@ -1,226 +1,280 @@
-# OpenCode 多模型辩论启动包
+# OpenCode 多模型讨论启动包
 
-这个目录帮助你在已经能调用多个模型系列的 OpenCode 中，建立多个讨论席位，完成多轮真实检索、互评和投票。它复用你已有的供应商配置，不需要把 API key 填进本包。
+用 OpenCode 中已配置的模型，组织多轮检索、互评和投票。目前设计了三类任务：围绕一个研究方向找新方案、针对一个具体问题形成结论，或用给定的问题和知识库讨论出能执行的解法。
 
-它提供配置生成器、主持/成员 prompt、统一研究背景与记录审核工具。实际模型调用由你的 OpenCode 执行；本包没有预先生成的科研答案，也没有替你在后台运行模型。随包附带的默认编排是六个模型系列、十个席位、三轮、8/10 门槛；这四个数字都在文件里，可以改，见「改席位、轮数与门槛」。
+项目包含配置生成器、主持和成员提示词、研究背景模板，以及讨论记录审核工具。模型调用由 OpenCode 执行，直接复用已有的供应商配置，无需另填 API key。
 
-## 两种模式
+默认配置是六个模型系列、十个席位、三轮讨论。提案模式下，候选方案需要获得 8/10 的推荐。席位、轮数和门槛都可以修改，见[修改配置](#修改配置)。
 
-同一套代码、同一套轮次与审核流程，只换「一轮产出什么」和「票怎么算」。用 `protocol.json` 的 `mode` 字段切换，默认 `proposal`。
+## 三种讨论模式
 
-|      | `proposal`（默认）                  | `evaluate`                       |
-| ---- | ------------------------------- | -------------------------------- |
-| 回答什么 | 这个方向还有没有值得做的新方案                 | 给定的这个问题，结论是什么                    |
-| 首轮产出 | 每人一个主方案                         | 每人一个明确立场（支持 / 反对 / 有条件成立 / 证据不足） |
-| 中间轮  | 合并相近方案、撤回站不住的                   | 收窄条件、修改或放弃立场                     |
-| 目录文件 | `debate/candidates.json`，`K01`… | `debate/conclusions.json`，`C01`… |
-| 投票   | 逐候选判断，可同时推荐多个                   | **单选**：只认一条结论或 `NONE`            |
-| 默认门槛 | 八成席位（十席 → 8/10）                 | 严格多数（十席 → 6/10）                  |
-| 认可键  | `approved_candidates`           | `adopted_conclusions`            |
-| 提示词  | `prompts/proposal/`             | `prompts/evaluate/`              |
-| 合法结果 | 没有值得推进的新方向                      | 没有多数认可的结论，或多数停在“证据不足”            |
+通过 `protocol.json` 的 `mode` 字段选择模式，默认是 `proposal`。三种模式共用运行和审核流程，区别在于讨论目标、一轮产出什么，以及票怎么算。
 
-`evaluate` 的门槛低不是放宽标准，而是问的问题不同：它问“大家怎么看”，不是“值不值得投入资源”。门槛与模式一起进入 `packet_sha256`；冻结之后再改模式，`audit` 会直接拒绝。
+| 项目    | `proposal`（默认）                     | `evaluate` | `solve` |
+| ----- | ---------------------------------- | -------------------------------------- | -------------------------------------- |
+| 讨论目标  | 寻找值得做的新方案                          | 对给定问题形成结论                              | 对给定问题讨论出能执行的解法 |
+| 首轮产出  | 每人一个主方案                            | 每人一个明确立场：支持、反对、有条件成立或证据不足              | 每人一个初步解法 |
+| 中间轮   | 合并相近方案，修改或撤回方案                     | 收窄条件，修改或放弃立场                           | 合并互补步骤，拆开或收窄方案 |
+| 目录文件  | `debate/candidates.json`，编号 `K01`… | `debate/conclusions.json`，编号 `C01`…    | `debate/solutions.json`，编号 `S01`… |
+| 投票方式  | 逐项判断，可推荐多个候选                       | 单选一条结论，或选 `NONE`                       | 逐项判断，可采纳多个方案 |
+| 评分项   | 新意、价值、可行性 | 置信度 | 价值、可靠性、可行性 |
+| 默认门槛  | 80% 的席位，十席为 8/10                   | 严格多数，十席为 6/10                          | 80% 的席位，十席为 8/10 |
+| 结果键   | `approved_candidates`              | `adopted_conclusions`                  | `adopted_solutions` |
+| 提示词目录 | `prompts/proposal/`                | `prompts/evaluate/`                    | `prompts/solve/` |
 
-切换方式：在 `protocol.json` 写 `"mode": "evaluate"`，或运行 `python debate_tools.py setup --mode evaluate`（会按该模式重算默认门槛，并保留 `rounds`）。模式在 `setup` 时被写进 `opencode.json` 的席位提示词，所以换模式要连同旧的 `opencode.json`、`roster.lock.json` 一起删掉再 setup——和改席位表一样。
+三种模式都允许没有结果：提案可以全部未达门槛，结论可以没有多数支持或多数认为证据不足，方案也可以没有一条值得采纳。
 
-选择 `evaluate` 时，`research_brief.md` 里要有一个**能被判真假的具体问题**（“某个做法在某个设置下是否成立”“某个说法有没有证据”），而不是一个宽泛的主题。题目本身有歧义时，席位会在首轮先写清自己按哪种理解作答。
+`proposal` 是唯一把新意当作标准的模式：已有的工作在那里是淘汰理由。`evaluate` 的门槛用于判断是否形成多数意见，需要一个具体、可判定的问题，例如“某个做法在某种设置下是否成立”或“某个说法是否有证据支持”。`solve` 回答的是“那我们该怎么做”：已有方法不是淘汰理由，正确复用某个已知做法是合法答案，票判断的是它在 `research_brief.md` 写明的资源、时间与权限下能不能真的做出来。
 
-## 最少操作
+切换时，可以在 `protocol.json` 中设置 `"mode": "solve"`，也可以运行：
 
-1. 解压到一个专用目录，例如 `D:\research\multimodel_debate`，用 OpenCode 打开这个目录。先使用普通 Build 会话。
-2. 把题目写进 `research_brief.md`。随包那份只是格式示例：复制 `research_brief.example.md` 改写机制段、已被占用的区域和已知负面证据。这一步不会替你想题目。
-3. 决定用哪种模式：找新方向（`proposal`，默认）还是对给定问题取多数结论（`evaluate`）。后者需要在 `research_brief.md` 里写出一个能被判真假的具体问题，并用 `setup --mode evaluate` 配置。
-4. 给 Build 发：**“请阅读 SETUP_PROMPT.txt，按里面的步骤完成配置。”** 生成器会读取 `opencode models` 的实际列表。能唯一识别时自动绑定，不能唯一识别时只需确认每个系列的真实模型 ID。不要把展示名当成 API ID。
-5. 生成后运行 `python debate_tools.py doctor`。它会用运行中的 OpenCode 核对：席位是否真的加载、模型 ID 是否与冻结席位表一致、是否恰好一个 primary、成员检索权限、以及 websearch 配置是否与实际凭据相符。
-6. 直接运行 `START_WINDOWS.cmd`（或 `python run_debate.py all`）。它逐席位启动真实会话，跑完全部轮次、冻结、审核并生成 `debate/final.md`。
+```text
+python debate_tools.py setup --mode solve
+```
 
-`reopen` 只是让你能在 TUI 里观察和追问；正式讨论不依赖 TUI 手动调度。
+该命令会按模式重新计算默认门槛，保留 `rounds`。模式还会影响 `opencode.json` 中的席位提示词，因此已有配置需要先删除 `opencode.json` 和 `roster.lock.json`，再运行 `setup`。模式和门槛都会计入 `packet_sha256`，冻结资料后再改会导致审核失败。
 
-设置阶段不会启动研究请求。正式开始后，成员会多次调用模型与检索工具；“R 轮”指每人 R 次正式发言，并不表示总共只有 R×席位数 次 API 请求——每轮内部还会调用检索工具，实际请求数远高于此。
+### 各模式该写什么样的题目
 
-### 关于联网检索
+`research_brief.md` 的写法随模式不同：
 
-OpenCode 的 `websearch` 需要已连接的搜索 provider 凭据（Exa / Tavily / Firecrawl / Parallel / TinyFish）。没有凭据时，每次 `websearch` 都会失败，而 CLI 会因此返回 **exit 1**——即使席位发言已经完整输出。所以：
+- **`proposal`**——一个有边界的方向、可用资源，并如实说明可能不存在值得做的新方向。示例：*“单张 24 GB 显卡上的本地大模型推理。哪一处机制层面的改动，能把 decode 延迟降到值得做最小判别实验的程度？”*
+- **`evaluate`**——一个有**明确真假**的问题，不是宽泛主题。示例：*“在单张 A100、批大小 32 的设定下，考虑当前草稿模型的额外开销，投机解码是否仍然快于普通解码？”*
+- **`solve`**——问题本身、你实际拥有的资源与权限、以及什么算做完。示例：*“我们有三万份扫描的中文合同 PDF，没有 OCR 预算，只有一台 16 GB 显卡的工作站和四周时间。要提取当事人名称、生效日期和违约金条款，并且错误率可审计。该怎么搭？”* 知识库材料放在 `materials/` 下。
 
-- 没有凭据：`setup` 默认用 `--search off`，在权限里 deny `websearch`。席位改走 `webfetch`：arXiv API 检索，arXiv HTML / ar5iv 读正文，`r.jina.ai` 把 ACL、PMLR、NeurIPS 的 PDF 转成文本（已验证可读方法段），见 `.opencode/skills/paper-search/SKILL.md`。
-- 有凭据：在 OpenCode 里 `/connect` 一个 provider，再用 `python debate_tools.py setup --search on ...` 重新生成配置。
-- `doctor` 会检查这两者是否一致，不一致就报失败。
+## 开始使用
 
-另外，`openreview.net` 会返回 Cloudflare 人机验证，任何席位都读不到；遇到时改用该论文的 arXiv 版本。
+1. 解压到专用目录，例如 `D:\research\multimodel_debate`，用 OpenCode 打开，进入普通 Build 会话。
+2. 参考 `research_brief.example.md`，把自己的题目写进 `research_brief.md`。重点补充问题边界、相关工作和已知负面结果。包内的内容只作格式参考。
+3. 选择讨论模式：找新方向用 `proposal`；讨论具体问题用 `evaluate`；用给定问题和知识库讨论解法用 `solve`。配置时分别加上 `--mode evaluate` 或 `--mode solve`。
+4. 给 Build 发送：**“请阅读 SETUP_PROMPT.txt，按里面的步骤完成配置。”** 生成器会读取 `opencode models`，自动匹配能够唯一识别的模型；有多个匹配时，需要确认实际模型 ID。这里要填完整 API ID，不能用展示名代替。
+5. 运行 `python debate_tools.py doctor`。它会检查 OpenCode 实际加载的席位、模型 ID、primary 数量、成员检索权限，以及 `websearch` 配置和凭据是否一致。
+6. 运行 `START_WINDOWS.cmd`，或执行 `python run_debate.py all`。脚本会依次完成各轮讨论、资料冻结、审核和总结，结果写入 `debate/final.md`。
 
-## 默认的十个席位
+需要在 TUI 中查看会话或继续追问时，可以使用 `reopen`。正式讨论由脚本调度。
 
-下表由 `roles.json` 生成，是随包默认编排，不是代码里的常量。`chair: true` 的那一席兼任主持。
+配置阶段不会发起研究请求。正式运行后，每个席位每轮发言都可能多次调用模型和检索工具，因此实际请求数通常远多于“轮数 × 席位数”。
 
-| 席位  | 默认模型系列 | 切入点               |
+### 联网检索
+
+`websearch` 需要连接搜索 provider，并配置相应凭据，支持 Exa、Tavily、Firecrawl、Parallel 和 TinyFish。缺少凭据时，搜索会失败，CLI 也会返回 `exit 1`，即使席位发言已经输出完毕。
+
+- **没有搜索凭据**：`setup` 默认使用 `--search off`，禁用 `websearch`。席位通过 `webfetch` 检索和读取论文：用 arXiv API 搜索，用 arXiv HTML / ar5iv 读正文，也可通过 `r.jina.ai` 读取 ACL、PMLR、NeurIPS 的 PDF 文本。具体用法见 `.opencode/skills/paper-search/SKILL.md`。
+- **已有搜索凭据**：先在 OpenCode 中通过 `/connect` 连接 provider，再用 `python debate_tools.py setup --search on ...` 重新生成配置。
+
+`doctor` 会核对配置和凭据，不一致时检查失败。访问 `openreview.net` 遇到 Cloudflare 人机验证时，改用论文的 arXiv 版本。
+
+## 默认席位
+
+默认的十个席位定义在 `roles.json` 中，其中 `chair: true` 的席位兼任主持。
+
+| 席位  | 默认模型系列 | 主要关注点             |
 | --- | ------ | ----------------- |
 | a01 | A 系列   | 数学机制与可证伪假设        |
 | a02 | A 系列   | 理论、反例与正确性边界       |
 | a03 | B 系列   | GPU 推理系统与实际开销     |
 | a04 | B 系列   | 解码、KV cache 与计算复用 |
-| a05 | C 系列   | 主持，兼独立实验设计研究者     |
+| a05 | C 系列   | 主持、独立实验设计         |
 | a06 | C 系列   | 最相近工作与新意审查        |
 | a07 | D 系列   | 架构与新问题            |
 | a08 | D 系列   | 替代解释与方法审查         |
 | a09 | E 系列   | 原论文、官方代码与文献证据     |
 | a10 | F 系列   | 跨领域启发             |
 
-主持席同时是一个普通研究席位，不会额外增加一个模型。实际配置是一个主 Agent 加其余席位的子 Agent。同一模型系列的多席位使用同一模型 ID，但拥有不同任务/会话与研究视角。角色只是检索切入点，不限制谁能提出或反驳某种观点。
+主持也参与研究和投票，计入十个席位。OpenCode 中对应一个主 Agent 和其余子 Agent。同一系列默认使用相同模型 ID，但各席位有独立的任务、会话和研究视角。表中的分工只决定检索重点，所有席位都可以提出方案或反驳其他观点。
 
-OpenCode 的子 Agent 是子会话，并不是天然互通的群聊。这里通过主持把既有轮次的原文放入统一资料包，让每个人在投票轮读到相同内容并回应，形成有记录的讨论。只开互不共享信息的聊天窗口，尚未完成这个过程。
+子 Agent 的会话不会自动互通。主持会把此前各轮的完整发言整理成统一资料包，供后续互评和投票使用。
 
-## 改席位、轮数与门槛
+## 修改配置
 
-三个文件决定编排，改完重新运行 `setup` 即可（前提是删掉旧的 `opencode.json` 与 `roster.lock.json`，生成器不会覆盖已有配置）：
+配置主要由以下三个文件控制。修改后，需要删除旧的 `opencode.json` 和 `roster.lock.json`，再运行 `setup`；生成器不会覆盖已有配置。
 
-- **`roles.json`**：席位表。每个席位有 `id`、`family`、`role`、`focus`；恰好一个席位带 `"chair": true`。ID 必须从 `a01` 起连续；至少三个席位（互评要求回应两个其他席位），至少两个模型系列。
-- **`protocol.json`**：`mode`、`rounds` 与 `threshold.numerator / denominator`。`rounds` 允许 2–4：最后一轮投票，之前各轮是检索与互评；设为 2 就是“独立提案 + 冻结后投票”，设为 3 会多一轮互评、合并与重新查重。分母必须等于席位数——固定分母是为了让缺席不能降低门槛。省略 `threshold` 时按模式取默认（`proposal` 80% 取整，十席 → 8/10；`evaluate` 严格多数，十席 → 6/10）；只写一半会报错，免得半截配置悄悄生效。省略 `mode` 时按 `proposal`。
-- **`model_map.json`**：`family` → 实际 `provider/model` ID，由 `setup` 从 `opencode models` 解析生成；也可手动编辑后作为 `--mapping` 传入。
-- **席位级 `model`**：在 `roles.json` 的某个席位上加 `"model": "provider/model-id"`，直接覆盖它所属系列的映射。ID 必须是完整形式（`provider/model`，不是展示名），且必须出现在 `opencode models` 里。覆盖优先于 `model_map.json`，并会写进 `roster.lock.json` 冻结；某个系列的席位全被覆盖时，该系列不需要 `model_map.json` 条目。想让同一系列的两个席位用不同模型，就用这个，不必为此多造一个系列。
+- `roles.json`：定义席位。每个席位包含 `id`、`family`、`role` 和 `focus`，且恰好一个席位设置 `"chair": true`。ID 从 `a01` 起连续编号。至少需要三个席位、两个模型系列，因为互评时每人要回应另外两个席位。
+- `protocol.json`：定义 `mode`、`rounds` 和 `threshold.numerator / denominator`。轮数可设为 2–4，最后一轮用于投票。设为 2 时，首轮结束后归并、冻结，再直接投票；设为 3 时，中间增加一轮互评、合并和查重。省略 `mode` 时使用 `proposal`；省略 `threshold` 时，提案模式与方案模式取席位数的 80%（取整），评估模式取严格多数。门槛的分子和分母需要同时填写，分母必须等于席位数，缺席不会降低门槛。
+- `model_map.json`：将 `family` 映射到实际的 `provider/model` ID。可由 `setup` 根据 `opencode models` 生成，也可手动填写后通过 `--mapping` 传入。
 
-门槛不是只写在 prompt 里：它进入 `packet_sha256` 的哈希输入，并在 `packet_manifest.json` 里留档。投票开始后再把 8/10 改成 5/10，`audit` 会因为 digest 不符直接拒绝，而不是悄悄放宽标准。
+如果想让同一系列的两个席位使用不同模型，可以在 `roles.json` 的相应席位中添加 `"model": "provider/model-id"`。这个设置优先于系列映射，ID 必须完整且出现在 `opencode models` 中。覆盖结果会写入 `roster.lock.json`；某个系列的所有席位都单独指定了模型时，就不需要再为该系列填写 `model_map.json`。
 
-## 多轮具体发生什么
+门槛会写入 `packet_manifest.json`，并参与 `packet_sha256` 计算。投票开始后修改门槛会造成摘要不一致，`audit` 将拒绝通过。
 
-下面按 `proposal` 写；`evaluate` 的差别只在括号里注明。
+## 讨论流程
 
-**第一轮独立构思。** 主持席先写定自己的提案（`evaluate`：立场），其余席位分别真实检索并各提一个主方案（`evaluate`：各自的回答与理由）。每人至少核查三份一手资料，不能全靠摘要。成员不能先读取别人的首轮答案。主持保留完整原文，不改写成自己的概括。
+下面以默认的 `proposal` 模式为例，`evaluate` 与 `solve` 的区别另作说明。
 
-**中间轮互评与收敛（rounds ≥ 3 时存在）。** 每人读此前各轮原文，重新检索后至少回应两个其他席位，并可以把几个相近提案合并成一个仍然做得完的候选、拆开只留有新意的一半，或撤回自己的方案（`evaluate`：把立场收窄成条件式、修改或明确放弃）。本轮不投票；每份记录必须写下实际用过的查询和最相近工作/证据 URL，缺记录的席位会被拒绝入档。合并后的新增判别点要写清楚，只把两个课题捆在一起不算合并。
+### 1. 独立构思
 
-**中间归并。** 主持把首轮提案与中间轮的合并建议归并为 1–5 个候选，每个方案都有确定机制、最相近工作、最小实验和停止条件（`evaluate`：归并为 1–5 条互斥、可判真假的结论，每条带最强反证和“什么观测会推翻它”）。所有首轮方案必须被保留/合并或明确说明排除原因；不能在这时添加未被讨论的新方案。然后生成含全部既有轮次原文的统一资料包，冻结版本。
+主持先提交自己的提案，其余席位独立检索，各提出一个主方案。每人至少核查三份一手资料，需要阅读正文，不能只依据摘要。首轮期间，成员不能读取其他人的答案。主持保存各席位的完整原文。
 
-**投票轮。** 所有人阅读统一资料包，至少回应两个其他席位，并在投票前再检索一次。主持席先写定自己的票，再收集其余席位的票。每人对所有候选逐一判断（`evaluate`：单选，只认一条结论或 `NONE`），不能看别人投票轮的票，也不能为了凑多数反复改票。
+`evaluate` 模式下，每人提交对问题的回答、立场和理由。`solve` 模式下，每人提交一个初步解法：对准问题卡在哪一步，写清可执行的步骤、每一步需要什么、以及最可能失败的地方。
 
-**最后汇总。** 以席位数为固定分母，默认 80% 推荐（十席即 8/10）表示值得优先做最小实验；`evaluate` 用严格多数（十席 6/10）表示多数席位认可同一条结论。评分与理由一起公开。主持保留异议。若没有方案（`evaluate`：结论）达到门槛，明确报告没有达到，不生成虚假共识。按协议轮数完成后停止，不自动追加轮次。
+### 2. 互评与修改
 
-“新意、意义足够，建议小实验”与“已经证明方法新颖/能发论文”不同。`evaluate` 里“6/10 认可”也只表示“多数席位基于本轮证据这么认为”，不是对问题本身的证明。模型投票具有相关性，不能作为统计证明。一条有实质证据的严重异议也不能被多数票盖过。`evaluate` 的票数还要看分布：如果票分散在三条以上互斥结论上，说明这个问题本轮没被回答，不能挑票数最高的一条写成“多数认可”。
+轮数不少于三轮时，才有这一阶段。
 
-## 不提供论文全文可以吗
+各席位阅读此前各轮原文，补充检索，并至少回应另外两个席位。可以合并相近提案、保留方案中有新意的部分，也可以撤回方案。合并后的方案需要说明新意，工作量也要可控。
 
-可以先不提供。`research_brief.md` 是新主题的背景摘要，通常写这几段：要解决什么问题与边界、此前相关讨论的结论（如果有）、已被占用的区域与已知负面证据、可以复用的实测方法与它不能说明什么，以及一张核对过编号和正文读取路径的文献线索表。这些足够开始构思。
+这一阶段不投票。每份记录都需要包含实际使用的查询和最相近工作或证据的 URL，缺少这些记录会被拒绝入档。
 
-包内自带的 `research_brief.md` 只是格式示例。换成你自己的题目时，复制 `research_brief.example.md` 改写即可；实际使用的 `research_brief.md` 不随仓库分发（已 gitignore）。
+`evaluate` 模式下，各席位可以补充成立条件、修改立场或明确放弃原立场。`solve` 模式下，可以合并互补的步骤、把方案拆开或收窄到它真正能解决的那一部分；如果前提在给定资源下满足不了，应当直接说出来。
 
-如果某个最终候选是否新颖取决于某篇论文的具体公式、router、KV 实现或实验设定，应在推进它之前补方法段/代码核查。没有全文时，成员必须把背景当作作者摘要，不能声称审阅过那篇论文的全文。
+### 3. 归并与冻结
 
-背景里已有的负面结果属于**上一场讨论**，本场不必延伸它；它写在简报里是为了标出已被占满的区域，以及作者已有的实测方法学（validation 筛选 → 独立 test 复测、执行了哪些层单独报告、一致率不等于质量）。换题目时只需重写这几段，其余流程不变。
+主持根据已有讨论整理出 1–5 个候选方案，每个方案需写清机制、最相近工作、最小实验和停止条件。所有首轮方案都要注明去向：保留、合并，或说明排除原因。归并时不能加入此前没有讨论过的新方案。
 
-可选补充材料放入 `materials/`。模型只能访问实际接入或提供的知识库，不能因 prompt 写了“检索各种知识库”就自动获得账号或付费数据库访问。
+`evaluate` 模式下，主持整理出 1–5 条互斥、可判定的结论，并列出各自最强的反证，以及什么观测会推翻它。`solve` 模式下，整理出 1–5 条可执行的方案，每条写清它解决哪一部分、为什么成立、依据是什么、需要哪些前提、最可能失败的一步，以及它明确不解决什么。
 
-## 自己用命令配置
+随后生成包含此前各轮完整原文的统一资料包，并冻结版本。
 
-需要本机已安装 OpenCode CLI 与 Python 3.10+，Python 不需要额外依赖。你既然已经在 OpenCode 配置好模型，不需要在这里再填密钥。
+### 4. 投票
+
+所有席位阅读同一份资料包，在投票前再次检索，并至少回应另外两个席位。主持先提交自己的票，再收集其他人的票。
+
+`proposal` 对所有候选逐项判断，可以推荐多个；`evaluate` 只能选择一条结论或 `NONE`；`solve` 对每条方案逐项判断，可以同时采纳多条——适用于不同条件的两个方案并不冲突。投票期间，各席位看不到其他人的票，也不能为了达到门槛反复改票。
+
+### 5. 汇总
+
+票数以全部席位为固定分母。默认情况下，提案获得 8/10 推荐后，列为优先进行最小实验的方向；评估结论获得 6/10 支持后，列为多数认可的结论；方案获得 8/10 采纳后，列为准备动手做的做法。总结中同时保留评分、理由和异议。没有候选达到门槛时，如实记录结果。完成设定轮数后停止，不自动追加讨论。
+
+这些票数用于辅助判断。方案获得推荐，还需要实验验证新意和效果；结论获得多数支持，也只代表各席位基于当前证据的判断；多条方案同时被采纳时，报告要写清各自适用的条件与代价，不能合成一条谁都没投过的“综合方案”。模型之间的判断可能相关，票数不能作为统计证明，有实质证据的严重异议仍需单独处理。
+
+在 `evaluate` 模式下，如果选票分散在三条以上互斥结论中，且没有一条达到门槛，应报告未形成多数结论，不能把得票最高直接写成多数认可。
+
+## 准备研究背景
+
+不必一开始就提供所有论文全文。先按 `research_brief.example.md` 准备背景，通常包含：
+
+- 要解决的问题、适用范围和限制条件；
+- 此前讨论的结论、已有工作和已知负面结果；
+- 可以复用的实测方法，以及这些结果能够支持什么判断；
+- 文献线索表，核对论文编号并注明正文读取路径。
+
+包内的 `research_brief.md` 只作格式示例。实际使用时，请换成自己的题目；个人使用的 `research_brief.md` 已加入 gitignore，不随仓库分发。补充材料可放在 `materials/`。
+
+如果背景沿用了上一场讨论的负面结果，写清它排除了哪些方向、留下了哪些可复用的方法即可。例如，是否经过 validation 筛选和独立 test 复测，执行了哪些层，一致率能否代表质量。本场讨论可以从新的问题开始。
+
+当某个候选的新意取决于具体公式、router、KV 实现或实验设定时，需要在推进前补查论文方法段或代码。只拿到背景摘要时，记录中也应注明依据是摘要。可访问的材料取决于实际接入的知识库和账号权限。
+
+## 命令行配置
+
+本机需要安装 OpenCode CLI 和 Python 3.10+，Python 无需额外依赖。模型凭据沿用 OpenCode 的现有配置。
 
 ```powershell
 opencode models
 python debate_tools.py models
-python debate_tools.py setup                              # proposal 模式（默认）
-python debate_tools.py setup --mode evaluate              # 对给定问题取多数结论
+python debate_tools.py setup                              # 默认 proposal 模式
+python debate_tools.py setup --mode evaluate              # 评估具体问题
+python debate_tools.py setup --mode solve                 # 讨论可执行的解法
 ```
 
-如 `python` 不可用，可使用 `py -3`，Linux 常用 `python3`。有多个同名供应商时，交互配置会列出真实 ID 让你选择。
+如果 `python` 不可用，Windows 可尝试 `py -3`，Linux 可使用 `python3`。有多个同名供应商时，交互配置会列出完整 ID 供选择。
 
-若由 OpenCode Build 自动执行，建议：
+由 OpenCode Build 自动执行时，使用非交互模式：
 
 ```text
 python debate_tools.py setup --non-interactive
 ```
 
-如果不能唯一识别系列名，复制 `model_map.example.json` 为 `model_map.json`，用 `opencode models` 中的真实完整 ID 填好六项，再执行：
+如果无法唯一识别模型系列，复制 `model_map.example.json` 为 `model_map.json`，填入 `opencode models` 中的完整 ID。默认配置需要填写六个系列，然后执行：
 
 ```text
 python debate_tools.py setup --mapping model_map.json --non-interactive
 ```
 
-Windows 也可先导出列表供脚本读取：
+Windows 也可以先导出模型列表：
 
 ```powershell
 opencode models | Set-Content -Encoding utf8 models.txt
 python debate_tools.py setup --inventory models.txt --mapping model_map.json --non-interactive
 ```
 
-不确定的映射不会静默回退到默认模型。脚本也不会覆盖已有 `opencode.json`、`opencode.jsonc` 或 `roster.lock.json`，因此请在专用新目录使用。
+无法确定映射时，脚本会要求补全配置，不会自动换用默认模型。已有的 `opencode.json`、`opencode.jsonc` 和 `roster.lock.json` 也不会被覆盖，建议在专用目录中使用。
 
-若只有桌面程序附带的 CLI 不在 PATH，找到它的实际路径后，可给 `models` 或 `setup` 添加 `--opencode "完整CLI路径"`；也可先用该 CLI 导出列表，再用 `--inventory`。这些参数不需要模型密钥。
+如果桌面程序附带的 CLI 不在 PATH 中，可以给 `models` 或 `setup` 添加 `--opencode "完整CLI路径"`，或者先用该 CLI 导出模型列表，再通过 `--inventory` 读取。
 
-Windows 启动：
+### 运行与续接
+
+Windows 可直接运行：
 
 ```powershell
 .\START_WINDOWS.cmd
 ```
 
-它先跑 `doctor`，再执行 `python run_debate.py all`。若想自己控制节奏：
+启动脚本会先执行 `doctor`，再运行 `python run_debate.py all`。也可以分步执行：
 
 ```powershell
-python run_debate.py round1          # 全部首轮
-python run_debate.py deliberate --round 2   # 第 2 轮互评（rounds ≥ 3 时）
-python run_debate.py merge           # 主持归并候选 + freeze
-python run_debate.py vote            # 全部投票轮席位
-python run_debate.py audit           # 统计与完整性检查
-python run_debate.py final           # 主持写 final.md
+python run_debate.py round1                # 第一轮
+python run_debate.py deliberate --round 2  # 第二轮互评，rounds ≥ 3 时使用
+python run_debate.py merge                 # 主持归并候选并冻结资料
+python run_debate.py vote                  # 投票轮
+python run_debate.py audit                 # 统计与完整性检查
+python run_debate.py final                 # 生成 final.md
 ```
 
-每一步都可加 `--resume` 跳过已完成的席位；`round1`、`deliberate` 与 `vote` 还可加 `--seats a01,a03` 只跑个别席位做低成本的格式与检索预检。
+每一步都可以加 `--resume`，跳过已完成的席位。`round1`、`deliberate` 和 `vote` 还支持 `--seats a01,a03`，便于先选少量席位检查格式和检索是否正常。
 
-同一轮内的席位可并行：`--parallel N`（默认 4，`1` 表示串行）。轮与轮之间仍然串行，主持自己那一步不会和其他席位同时跑，因为每一轮都要读上一轮的文件。
+同一轮内可用 `--parallel N` 控制并发数，默认是 4，设为 1 时串行运行。轮次之间按顺序执行；主持的发言或投票先完成，再运行其他席位。
 
-这里的模型名称沿用你的供应商显示名。具体完整 ID 与工具调用支持以你本机实际能力为准；模型自称某品牌不能验证其背后的权重身份。如果某席位缺少检索/工具能力，应报告未完成，不能用另一个模型偷偷代替它。
+模型名称和完整 ID 以供应商及本机的 `opencode models` 列表为准。模型的自述不能用于确认后端权重身份。某个席位不具备所需的检索或工具能力时，应记录为未完成，不能用其他模型代替。
 
 ## Docker（可选）
 
-容器跑的是同一份代码、同一个 `debate/` 目录。省掉在本机装 Python 与 OpenCode CLI，也让十席位不必开十个终端。
+Docker 使用同一套代码和 `debate/` 目录，可以省去本机安装 Python 和 OpenCode CLI 的步骤。
 
 ```bash
-cp .env.example .env          # 把 OPENCODE_CONFIG 改成绝对路径
+cp .env.example .env          # 将 OPENCODE_CONFIG 改为绝对路径
 docker compose build
-docker compose run --rm setup # 只需一次：生成 model_map.json 与 opencode.json
+docker compose run --rm setup # 首次运行，生成 model_map.json 和 opencode.json
 docker compose run --rm doctor
-docker compose up             # 完整运行，日志直接打到终端
+docker compose up             # 完整运行，日志输出到终端
 ```
 
-- **配置是挂载进去的，不复制。** `OPENCODE_CONFIG` 指向你已有的 `opencode.json` 与供应商凭据所在目录，只读挂载；`.dockerignore` 已把 `debate/`、`.env`、`roster.lock.json` 排除在构建上下文之外。镜像和仓库里都没有密钥。`.env` 由用户自己建、不进仓库；`OPENCODE_CONFIG` 留空时 compose 直接拒绝启动并点名缺哪个变量，而不是挂一个空目录然后报成供应商错误。
-- **compose 不展开 `~`。** 必须写绝对路径：Linux/macOS 用 `/home/you/.config/opencode`，Windows 用 `C:/Users/you/.config/opencode`。
-- **运行状态在具名卷 `opencode-state` 里**，保存 `~/.local/share` 与 `~/.local/state`。OpenCode 的 SQLite 数据库用 WAL 模式，需要宿主绑定挂载（Windows/macOS）提供不了的共享内存语义：指到宿主机副本会报 `disk I/O error`，随后 CLI 报“Background service failed to start”。所以只有配置目录和工作目录是绑定挂载。`docker compose down -v` 会清掉这个卷，包括正在进行的会话数据库。
-- **构建镜像源。** `.env` 里的 `DEBIAN_MIRROR` 替换 `apt-get` 使用的 Debian 源，留空则用 `deb.debian.org`。构建参数必须留在 `docker-compose.yml` 里——在 `docker compose build` 命令行上临时传的不会带到下一次 `docker compose run`。
-- **uid。** 镜像以 uid/gid 1000 运行。你的 uid 不同时加 `--user "$(id -u):$(id -g)"`；入口脚本会创建所需目录，只要挂载路径可读，换 uid 也能跑。
-- **另一种做法（非默认）：** 不挂配置目录，改用环境变量传供应商密钥。这需要改 `docker-compose.yml`（删掉 `OPENCODE_CONFIG` 那一行挂载）；默认选择挂配置目录，是因为只有一条路径需要审计，compose 文件里也不出现密钥。
+`.env` 中的 `OPENCODE_CONFIG` 应指向已有的 OpenCode 配置和供应商凭据目录。该目录以只读方式挂载，不会复制进镜像。`.dockerignore` 已排除 `debate/`、`.env` 和 `roster.lock.json`，镜像和仓库不包含密钥。
 
-## 输出在哪里、怎样查看
+配置时注意以下几点：
 
-正式运行后，由主持写入 `debate/`：
+- **使用绝对路径。** Compose 不展开 `~`。Linux/macOS 例如 `/home/you/.config/opencode`，Windows 例如 `C:/Users/you/.config/opencode`。
+- **会话状态保存在具名卷 `opencode-state` 中。** 该卷保存 `~/.local/share` 和 `~/.local/state`。OpenCode 的 SQLite 数据库使用 WAL 模式，在 Windows/macOS 上直接绑定宿主机状态目录可能出现 `disk I/O error`，随后报 `Background service failed to start`。因此默认只对配置目录和工作目录使用绑定挂载。执行 `docker compose down -v` 会删除状态卷，包括其中的会话数据库。
+- **Debian 镜像源可配置。** 在 `.env` 中填写 `DEBIAN_MIRROR`，可替换 `apt-get` 使用的源，留空时使用 `deb.debian.org`。构建参数需保留在 `docker-compose.yml` 中；只在 `docker compose build` 命令行临时传入的参数不会带到下一次 `docker compose run`。
+- **默认 uid/gid 为 1000。** 如果宿主机使用其他 uid，可加 `--user "$(id -u):$(id -g)"`。入口脚本会创建所需目录，挂载路径需要具备相应访问权限。
 
-| 文件                                               | 含义                                                    |
-| ------------------------------------------------ | ----------------------------------------------------- |
-| `run_log.md`                                     | 席位与配置模型、阶段、失败与续接情况                                    |
-| `logs/`                                          | 每席位每次调用的原始 JSON 事件流、stderr 和工具错误清单，用于核对真实调用           |
-| `round1/a01.md` … `a10.md`                       | 第一轮每席位一份完整发言                                          |
-| `round2/`、`round3/`（存在时）                         | 中间轮与投票轮每席位一份完整原文                                      |
-| `candidates.json`（`evaluate`：`conclusions.json`） | 固定候选定义与全部首轮方案的去向                                      |
-| `vote_packet.md`、`packet_manifest.json`          | 每人投票轮读取的相同资料与版本                                       |
-| `votes.csv`、`audit.json`                         | 实际票数、完整性与版本检查结果                                       |
-| `final.md`                                       | 主持总结：优先候选、证据、异议、最小实验（`evaluate`：每条结论的票数与最强反证），或没有足够支持 |
+也可以改用环境变量传入供应商密钥，但需要先从 `docker-compose.yml` 中删除 `OPENCODE_CONFIG` 的目录挂载。默认挂载已有配置目录，便于沿用本机设置。
 
-主持的本地审核命令：
+## 输出与审核
+
+运行结果保存在 `debate/`：
+
+| 文件                                          | 内容                                    |
+| ------------------------------------------- | ------------------------------------- |
+| `run_log.md`                                | 席位、配置模型、执行阶段、失败和续接记录                  |
+| `logs/`                                     | 各席位调用的原始 JSON 事件流、stderr 和工具错误        |
+| `round1/a01.md` … `a10.md`                  | 各席位的首轮完整发言                            |
+| `round2/`、`round3/`（存在时）                    | 后续互评或投票轮的完整原文                         |
+| `candidates.json`（评估模式为 `conclusions.json`） | 冻结的候选定义，以及各首轮方案的去向                    |
+| `vote_packet.md`、`packet_manifest.json`     | 投票使用的统一资料包和版本信息                       |
+| `votes.csv`、`audit.json`                    | 票数统计、完整性和版本检查结果                       |
+| `final.md`                                  | 主持总结：候选、证据、异议和最小实验；评估模式下包含各结论的票数和最强反证 |
+
+没有候选达到门槛时，`final.md` 会说明这一结果。
+
+本地冻结和审核命令：
 
 ```text
 python debate_tools.py freeze
 python debate_tools.py audit
 ```
 
-缺票、重复投同一候选、资料版本变动、配置模型与席位表不一致等会阻止生成有效推荐。审核器只检查记录与票数，无法证明引用内容真实，也无法证明每个席位确实由对应后端执行。要核对真实调用，看 `debate/logs/` 里每个席位的原始 JSON 事件流（含 `sessionID`、`model`、每次工具调用及结果）；不要只信一张角色自述表。
+缺票、对同一候选重复投票、资料版本变化、配置模型与席位表不一致等问题，都会阻止审核通过。审核器检查的是记录和票数；引用是否准确，需要结合原文判断。核对模型调用时，可查看 `debate/logs/` 中的 `sessionID`、`model`、工具调用和结果，而不能仅凭角色自述确认后端。
 
-模型的推荐理由、最相近论文差异和没有解决的问题，比票数本身更值得读。整个过程不启动GPU训练；选出方向后再决定是否运行最小实验。
+阅读结果时，建议连同推荐理由、与最相近论文的差异、尚未解决的问题一起看。讨论过程不会启动 GPU 训练，选定方向后再安排最小实验。
 
-## 验证与依据
+## 验证记录与参考文档
 
-本包本地的验证记录见 `VALIDATION.md`。本地测试不调用任何模型 API；真实跨供应商与网页工具能力需要在你的 OpenCode 环境确认。
+本地验证记录见 `VALIDATION.md`。本地测试不调用模型 API，跨供应商调用和网页工具能力需要在实际 OpenCode 环境中检查。
 
-以下是2026-10-17核对的 OpenCode 官方文档：
+以下 OpenCode 官方文档于 2026-10-17 核对：
 
-- Agents，自定义模型、primary/subagent、Task权限：https://opencode.ai/docs/agents/
-- Config，项目配置与全局配置合并、默认Agent：https://opencode.ai/docs/config/
-- CLI，`opencode models`、`--agent` 与模型 ID：https://opencode.ai/docs/cli/
-- Tools，websearch/webfetch与检索启用环境变量：https://opencode.ai/docs/tools/
-- Commands，自定义启动命令：https://opencode.ai/docs/commands/
+- [Agents](https://opencode.ai/docs/agents/)：自定义模型、primary/subagent 和 Task 权限
+- [Config](https://opencode.ai/docs/config/)：项目配置与全局配置合并、默认 Agent
+- [CLI](https://opencode.ai/docs/cli/)：`opencode models`、`--agent` 和模型 ID
+- [Tools](https://opencode.ai/docs/tools/)：websearch、webfetch 和检索启用环境变量
+- [Commands](https://opencode.ai/docs/commands/)：自定义启动命令
