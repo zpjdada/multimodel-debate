@@ -1,0 +1,18 @@
+{
+  "conclusions": [
+    {
+      "id": "C01",
+      "statement": "用真实中间轮归并出的结论替换；本文件不是研究结果。一句话回答 research_brief.md 里的问题",
+      "source_positions": ["S-a01", "S-a04"],
+      "reasoning": "支撑这条结论的机制论证；有式子先定义符号和假设，并说明哪一步是推断而非已证",
+      "evidence": [
+        {"title": "实际核查的最相关一手资料", "url": "实际URL", "level": "完整方法段/部分正文/仅摘要", "supports": "这份材料究竟支持结论的哪一部分，适用条件是什么"}
+      ],
+      "strongest_objection": "最强的反方证据或反方论证，从席位原文里提取，不能写成稻草人",
+      "what_would_change_it": "具体到可观测的量与方向：观察到什么就应推翻或收窄这条结论"
+    }
+  ],
+  "excluded_positions": [
+    {"position_id": "S-a02", "reason": "逐一填写真实排除原因；其余首轮立场也必须被保留/合并或解释排除，不能照抄此示例"}
+  ]
+}

@@ -1,0 +1,42 @@
+# Keep the build context small, and never bake transcripts or credentials into
+# the image. The container mounts the project at run time anyway, so the copy
+# only needs the code that the entrypoint runs.
+.git
+.gitignore
+.dockerignore
+.env
+.opencode
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+
+# generated per machine
+opencode.json
+roster.lock.json
+model_map.json
+
+# debate transcripts and results
+debate/
+debate_*/
+materials/
+
+# the real topic brief stays on the host; the image gets the example
+research_brief.md
+
+# local paths and the fallback config dir
+.env
+.opencode-config/
+.opencode-data/
+
+# local probes and inventories
+models.txt
+probe-*.log
+*.log
+
+# editor / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db

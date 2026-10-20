@@ -1,0 +1,28 @@
+﻿# generated per machine by `python debate_tools.py setup`
+opencode.json
+roster.lock.json
+model_map.json
+
+# debate state and transcripts
+debate/
+debate_*/
+
+# optional material dumps are per-user; keep the placeholder that explains them
+materials/*
+!materials/README.md
+
+# the topic you actually run is yours, not the package's
+research_brief.md
+
+# docker: local paths in .env, and the fallback config dir
+.env
+.opencode-config/
+.opencode-data/
+
+# python
+__pycache__/
+*.pyc
+
+# exported model inventories and local probes
+models.txt
+probe-*.log

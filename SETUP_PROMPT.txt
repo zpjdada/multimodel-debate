@@ -1,0 +1,16 @@
+请帮我配置当前目录中的多模型科研讨论组。先读 README_zh.md、roles.json、protocol.json、research_brief.md 和 debate_tools.py 的参数说明。本次只安装/检查项目配置，不启动讨论。
+
+0. `research_brief.md` 是本次要讨论的题目背景。若它只有示例内容、或根本不存在，先复制 `research_brief.example.md` 为 `research_brief.md`，然后**停下来问我题目**：需要我提供机制段、已被占满的区域、已知负面证据和文献线索。不要自己编造研究背景，也不要替我选题目。若我已在 `research_brief.md` 里写好内容，直接沿用。
+
+   同时确认模式：`protocol.json` 的 `mode` 为 `proposal`（找值得做的新方向，默认）还是 `evaluate`（对给定的一个问题取多数认可的结论）。用 `evaluate` 时，`research_brief.md` 里必须有**一个能被判真假的具体问题**，否则先问我；宽泛的主题不能当问题用。切换用 `python debate_tools.py setup --mode evaluate`（会按该模式重算默认门槛并保留 rounds），也可以直接改 `protocol.json` 的 `mode`。
+
+1. 使用本机已经安装的 OpenCode 和已经配置好的供应商。运行 opencode models 取得真实的 provider/model ID，不读取或展示 API key，不另建供应商。若命令不在 PATH，尝试定位已安装 CLI 的完整路径，给脚本 models/setup 加 --opencode "实际CLI路径"；也可以用完整路径的 CLI 导出模型列表后走 --inventory。不要猜模型 ID。
+2. `roles.json` 是席位表，随包默认是六系列十席位：A 系列两席、B 系列两席、C 系列两席、D 系列两席、E 系列一席、F 系列一席。其中带 `"chair": true` 的 a05（C 系列）兼任主持，agent 名为 debate-chair；其余席位是 subagent 模式的独立 Agent（debate-<id>），不增加额外投票席位。系列名只是占位符，实际对应哪个模型由 model_map.json 决定。若用户改过 roles.json，以文件为准：席位数、系列与主持都由它决定，不要按这里的默认数字写死。
+3. 用 python debate_tools.py models 检查识别结果，再用 python debate_tools.py setup --non-interactive 生成配置。Python 也可用 python3 或 py -3。若多个候选或供应商自定义别名导致无法唯一映射，只根据实际模型列表和本机已有模型显示名确认；把每个系列一个完整 ID 写入 model_map.json，再执行 python debate_tools.py setup --mapping model_map.json --non-interactive。不要因 ID 不明就让所有 Agent 继承当前默认模型。确实无法确认时仅询问缺少的模型 ID，不索要密钥。
+4. 如果 CLI 形式不方便，可以先在当前目录用 opencode models | Set-Content -Encoding utf8 models.txt 保存列表，再给脚本加 --inventory models.txt。生成器不调用模型 API，不开始讨论。
+5. 这个包应在专用目录使用；已有 opencode.json/jsonc 时不覆盖它。不要修改我的全局供应商配置、auth.json 或 CC Switch 配置。
+6. 生成配置必须是 V2 原生形状：顶层 `agents` 与 `commands`，权限是 `permissions` 规则数组（最后一条命中者生效）。不要再生成 V1 的 `agent`/`command`/`permission` 键，否则 OpenCode 会报废弃警告。每个角色各一个 Agent，恰好一个 primary（debate-chair），其余为 subagent；model 字段都明确绑定实际 ID；subagent 不能再派生其他 Agent（权限里 subagent deny）。
+7. 运行 python debate_tools.py doctor。它会用 opencode debug agents 核对：席位是否真的被运行时加载、模型是否与 roster.lock.json 一致、mode 是否正确、是否恰好一个 primary、成员 websearch/webfetch/skill 权限、以及 websearch 配置与实际 provider 凭据是否相符。任何一项失败都要先修好，不要跳过。
+8. 检索通道：OpenCode 内置 websearch 需要已连接的搜索 provider 凭据。没有凭据时 `setup` 默认 `--search off`，权限里 deny websearch，席位改走 webfetch：arXiv API 检索，arXiv HTML / ar5iv 读正文，`r.jina.ai` 把 ACL、PMLR、NeurIPS 的 PDF 转成文本（见 .opencode/skills/paper-search/SKILL.md）。若本机已 /connect 了 Exa/Tavily/Firecrawl/Parallel/TinyFish 之一，用 `--search on` 重新生成。
+
+最后只给我实际席位/模型映射表、模式（`protocol.json` 的 mode）、轮数（`rounds`）、门槛（`threshold`）、doctor 的结论，以及下一步应运行哪条命令。不要声称讨论已运行，也不要伪造讨论结果。

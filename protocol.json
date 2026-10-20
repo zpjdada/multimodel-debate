@@ -1,0 +1,8 @@
+{
+  "mode": "proposal",
+  "rounds": 3,
+  "threshold": {
+    "numerator": 8,
+    "denominator": 10
+  }
+}

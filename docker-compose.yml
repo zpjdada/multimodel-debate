@@ -1,0 +1,86 @@
+# Optional container run. Same harness, same files; the container only removes
+# the "which Python, which opencode" questions, and lets a ten-seat round run at
+# --parallel 4 without ten terminals.
+#
+# Default: mount your real OpenCode config directory (opencode.json, provider
+# keys, skills). Nothing is copied into the image, and no credential ever
+# appears in the build context.
+#
+#   cp .env.example .env     # then set an absolute OPENCODE_CONFIG
+#   docker compose build
+#   docker compose run --rm setup       # once: writes model_map.json + opencode.json
+#   docker compose run --rm doctor
+#   docker compose up                   # full run; logs stream to your terminal
+#
+# Runtime state (~/.local/share/opencode: session DB, logs) lives in a named
+# volume, not on the host. OpenCode keeps its SQLite database in WAL mode, and
+# WAL needs shared-memory semantics that a Windows/macOS bind mount does not
+# provide: pointing it at the host copy fails with "disk I/O error" and the CLI
+# then reports "Background service failed to start".
+#
+# If your uid is not 1000, add --user "$(id -u):$(id -g)" to the run commands.
+#
+# Alternative (documented, not the default): do not mount the config at all,
+# pass provider keys as environment variables, and let the image keep its own
+# empty config directory. That path is described in README.md under Docker.
+
+# Explicit project name: image tags then stay the same no matter what the
+# checkout directory is called, and `docker compose down` cannot hit another
+# project that happens to share the folder name.
+name: multimodel-debate
+
+x-opencode-volumes: &opencode-volumes
+  - .:/work
+  # No fallback on purpose. A missing .env would otherwise bind an empty
+  # directory here and every command would fail later with a provider error
+  # that says nothing about the real cause.
+  - ${OPENCODE_CONFIG:?set OPENCODE_CONFIG in .env (copy .env.example first)}:/home/debate/.config/opencode:ro
+  - opencode-state:/home/debate/.local/share
+  - opencode-state:/home/debate/.local/state
+
+x-opencode-env: &opencode-env
+  HOME: /home/debate
+  OPENCODE_CONFIG_DIR: /home/debate/.config/opencode
+  XDG_DATA_HOME: /home/debate/.local/share
+  XDG_STATE_HOME: /home/debate/.local/state
+
+# Build args need to live in the compose file, otherwise a later `docker compose
+# run` rebuild silently falls back to the upstream Debian mirror.
+x-build: &build
+  context: .
+  args:
+    DEBIAN_MIRROR: ${DEBIAN_MIRROR:-deb.debian.org}
+
+services:
+  harness:
+    build: *build
+    user: "1000:1000"
+    working_dir: /work
+    volumes: *opencode-volumes
+    environment: *opencode-env
+    command: ["all", "--parallel", "4"]
+    stdin_open: true
+    tty: true
+
+  setup:
+    build: *build
+    user: "1000:1000"
+    working_dir: /work
+    volumes: *opencode-volumes
+    environment: *opencode-env
+    entrypoint: ["python3", "debate_tools.py"]
+    command: ["setup", "--non-interactive"]
+
+  # `doctor` lives in debate_tools.py, not in run_debate.py, so it gets its own
+  # entrypoint rather than a subcommand of the harness service.
+  doctor:
+    build: *build
+    user: "1000:1000"
+    working_dir: /work
+    volumes: *opencode-volumes
+    environment: *opencode-env
+    entrypoint: ["python3", "debate_tools.py"]
+    command: ["doctor"]
+
+volumes:
+  opencode-state:

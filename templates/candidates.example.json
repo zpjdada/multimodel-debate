@@ -1,0 +1,18 @@
+{
+  "candidates": [
+    {
+      "id": "K01",
+      "title": "用真实首轮方案替换；本文件不是研究结果",
+      "source_proposals": ["P-a01"],
+      "mechanism": "准确、固定的机制定义，包括数学假设、计算路径和额外成本",
+      "closest_work": [
+        {"title": "实际核查的最相近工作", "url": "实际URL", "difference": "机制或问题定义的具体差别，以及尚未确认之处"}
+      ],
+      "minimum_experiment": "验证关键假设所需的最小实验与必要对照",
+      "stop_condition": "观察到哪些结果就停止这个具体方案"
+    }
+  ],
+  "excluded_proposals": [
+    {"proposal_id": "P-a02", "reason": "逐一填写真实排除原因；其余八个首轮提案也必须被保留/合并或解释排除，不能照抄此示例"}
+  ]
+}
