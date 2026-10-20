@@ -4,10 +4,16 @@
 
    文献线索和 `materials/` 下的补充材料都是可选的，不要为了"填满"而替我编。如果我说想预置一批文献，就把题名、发表处、带版本号的编号（如 `2404.16710v4`）和正文可读路径写进简报的"可选一"那节；如果我有席位拿不到的本地材料（付费论文集、中文文献、内部笔记），提醒我放进 `materials/` 并在"可选二"那节列一张表。知网（CNKI）目前读不到——检索页停在安全验证，正文还要求登录和机构订阅；要我提供中文文献时，说清需要我自己下载并转成 PDF 或纯文本，`.caj` 席位读不了。
 
+   如果我只给了一句话的题目、还没写简报，可以按 `research_brief.example.md` 的骨架帮我起草，但**问题、硬约束（硬件/预算/时间/权限）和已知失败经验必须问我**，不能自己编；起草完把每一节的假设列给我确认。
+
+   写完之后检查 `roles.json` 的十条 `focus`：默认值是与题目无关的检索角度，换到跨度很大的领域时才需要重写。若需要重写，先写出来给我看，确认十条彼此有区分度（都写成"寻找新方向"等于十个席位搜同一批论文），再继续下一步。不要改 `id`、`family`、`role` 和 `chair` 的设置，除非我明确要求。
+
    同时确认模式：`protocol.json` 的 `mode` 为 `proposal`（找值得做的新方向，默认）、`evaluate`（对给定的一个问题取多数认可的结论）还是 `solve`（对给定的问题讨论出能执行的解法，不要求新意）。用 `evaluate` 时，`research_brief.md` 里必须有**一个能被判真假的具体问题**；用 `solve` 时，必须写清可用资源、时间与权限边界，以及什么算做完，否则先问我；宽泛的主题不能当问题用。切换用 `python debate_tools.py setup --mode evaluate`（或 `--mode solve`，会按该模式重算默认门槛并保留 rounds），也可以直接改 `protocol.json` 的 `mode`。
 
 1. 使用本机已经安装的 OpenCode 和已经配置好的供应商。运行 opencode models 取得真实的 provider/model ID，不读取或展示 API key，不另建供应商。若命令不在 PATH，尝试定位已安装 CLI 的完整路径，给脚本 models/setup 加 --opencode "实际CLI路径"；也可以用完整路径的 CLI 导出模型列表后走 --inventory。不要猜模型 ID。
 2. `roles.json` 是席位表，随包默认是六系列十席位：A 系列两席、B 系列两席、C 系列两席、D 系列两席、E 系列一席、F 系列一席。其中带 `"chair": true` 的 a05（C 系列）兼任主持，agent 名为 debate-chair；其余席位是 subagent 模式的独立 Agent（debate-<id>），不增加额外投票席位。系列名只是占位符，实际对应哪个模型由 model_map.json 决定。若用户改过 roles.json，以文件为准：席位数、系列与主持都由它决定，不要按这里的默认数字写死。
+
+   主持的模型应优先选上下文最长、在长资料包上最不容易丢细节的那个，而不是最会提案的那个：它的活儿是把九份首轮原文、十份互评和证据链接忠实转述成可投票的候选。默认 a05 与 a06 同属 C 系列、共用同一个模型 ID，会把"什么算新"的偏差写进两个席位；映射模型时如果本机有更合适的长上下文模型，可以建议给 a05 单独写 `"model"` 覆盖，但由我决定，不要擅自改。
 3. 用 python debate_tools.py models 检查识别结果，再用 python debate_tools.py setup --non-interactive 生成配置。Python 也可用 python3 或 py -3。若多个候选或供应商自定义别名导致无法唯一映射，只根据实际模型列表和本机已有模型显示名确认；把每个系列一个完整 ID 写入 model_map.json，再执行 python debate_tools.py setup --mapping model_map.json --non-interactive。不要因 ID 不明就让所有 Agent 继承当前默认模型。确实无法确认时仅询问缺少的模型 ID，不索要密钥。
 4. 如果 CLI 形式不方便，可以先在当前目录用 opencode models | Set-Content -Encoding utf8 models.txt 保存列表，再给脚本加 --inventory models.txt。生成器不调用模型 API，不开始讨论。
 5. 这个包应在专用目录使用；已有 opencode.json/jsonc 时不覆盖它。不要修改我的全局供应商配置、auth.json 或 CC Switch 配置。

@@ -12,6 +12,27 @@ The shipped default is six model families across ten seats, three rounds, with
 an 8/10 threshold. Those numbers live in `roles.json` and `protocol.json`, not
 in code.
 
+## Who this is for
+
+Not a one-click tool. Before you start, you should be comfortable with:
+
+- choosing models in OpenCode and reading `opencode models` output, including
+  full `provider/model` IDs;
+- editing JSON (`roles.json`, `protocol.json`) and running
+  `python debate_tools.py` / `run_debate.py`;
+- reading an error message. `setup`, `doctor` and `audit` each name what is
+  missing; re-running after skipping one just reproduces it;
+- having a question worth arguing about, and resource limits you can state.
+
+You do not need to write prompts, call a model API, or know Docker (the
+container is optional). The step most first runs get wrong is not
+configuration but an empty `research_brief.md`: with no boundaries, the seats
+drift into a literature review.
+
+If the first two items are already fine, the cheapest path is to let an agent
+do the configuration and drafting — see
+[Delegating to an agent](#delegating-to-an-agent).
+
 ## Three modes
 
 One code path, one set of rounds and one audit. The `mode` field in
@@ -135,6 +156,29 @@ gitignored, so your material is never published with the package.
 `setup` refuses to overwrite an existing `opencode.json` or
 `roster.lock.json`, so regenerate only after backing both up and deleting them.
 
+## Delegating to an agent
+
+An agent can do the mechanical parts for you: rewrite `focus` entries for a new
+field, fill in `research_brief.md` from a description you give it, run `setup`,
+`doctor` and the driver. What it must not do is write the discussion. If an
+agent composes seat statements itself, the run becomes one model talking to
+itself, and `audit` will not catch it — it checks file structure, versions and
+tally, not who wrote the text. The driver launches a real session per seat; that
+is the part worth having.
+
+A workable division:
+
+- **You supply** the problem, the hard constraints, and what you have already
+  tried and failed at. Those cannot be invented: a brief padded with generic
+  framing becomes the factual base every seat reasons from.
+- **The agent supplies** the formatting (copying the example and filling each
+  section), a rewritten `focus` list when you change field, and the command
+  sequence. Ask it to show you the ten `focus` lines before it runs `setup` —
+  if they all read "find new directions", ten seats will search the same
+  papers and the vote is a sample of one view.
+- **The package supplies** the seats. Point the agent at `SETUP_PROMPT.txt` and
+  it will stop and ask you for the topic rather than inventing one.
+
 ## Layout
 
 ```
@@ -165,6 +209,18 @@ Generated per machine and not meant to be committed: `opencode.json`,
 - **`roles.json`** — IDs must run `a01`, `a02`, … with no gaps; exactly one seat
   has `"chair": true`; at least three seats and two families. Every review
   round asks a seat to respond to two others, which is why three is the floor.
+  The shipped `focus` strings are deliberately topic-agnostic so a new topic
+  usually needs no edit; rewrite them only when you change field entirely (see
+  [Delegating to an agent](#delegating-to-an-agent)).
+- **The chair's model** — pick the longest-context model that loses the least
+  detail over a long packet, not the best proposer. The chair's job is to
+  restate nine first-round texts, ten reviews and a pile of evidence links
+  faithfully into a votable catalog; `merge_rule` forbids it from adding a claim
+  no seat made. Putting your strongest proposer there tends to produce quiet
+  rewrites of other people's candidates, which no prompt fully prevents. In the
+  shipped table `a05` (chair) and `a06` (novelty review) share a family and
+  therefore a model ID, so one view of "what counts as new" lands in two seats;
+  give `a05` its own `"model": "..."` if that matters to you.
 - **`protocol.json`** — `mode`, `rounds`, and `threshold`. `rounds` accepts 2–4.
   The last round is the vote; every earlier round is independent search, review
   and consolidation. `rounds: 2` is the minimal "propose, freeze, vote" run.
