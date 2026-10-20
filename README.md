@@ -68,19 +68,38 @@ Each mode expects a different shape of brief:
 
 ## Your own knowledge base
 
-Put anything you want the seats to read — method sections, TeX, experimental
-notes, code excerpts — under `materials/`. The directory is bind-mounted with
-the rest of the project, so the same files are visible inside Docker. Two
-limits are worth knowing:
+Two optional inputs, both of them listed in `research_brief.md`. Leaving either
+out is normal: every seat searches on its own, and each round requires at least
+one source that is not on the list you supplied.
+
+- **A reference list.** Title, venue, ID with a version suffix
+  (`2404.16710v4`; bare IDs often resolve to nothing), and the path that gets
+  you the body text. Use it to skip re-searching well-known baselines, or to
+  make sure a specific baseline is not missed. The package guarantees nothing
+  about these entries — check each one yourself before listing it, since a seat
+  will otherwise spend a round chasing an ID that does not exist.
+- **Local material under `materials/`.** For anything seats cannot reach
+  themselves: paywalled proceedings, Chinese-language papers, internal notes,
+  logs, code snapshots. List each file with author, source, how deep you read
+  it, and what you want it to support.
+
+Two limits are worth knowing:
 
 - **Text, not PDFs.** Seats read files with ordinary tools; whether a PDF is
   readable depends on the provider and the tool set. Prefer plain text,
-  Markdown, TeX or source code.
+  Markdown, TeX or source code. A scanned PDF with no text layer reads as blank,
+  so supply a `.txt` alongside it.
 - **Provided, not subscribed.** A seat can only use material that is actually
   present here or reachable through the configured retrieval tools. A prompt
   saying "search the literature" does not grant access to a paid database, and
   a seat that could not read something is required to say so rather than
   pretend.
+
+**CNKI (知网) is not reachable.** Its search page stops at a security
+verification, and the full text additionally requires login and institutional
+subscription; there is no channel through the retrieval tools. Download what you
+need yourself and put it under `materials/` — and convert CNKI's `.caj` exports
+to PDF or plain text first, because seats cannot read `.caj`.
 
 `materials/README.md` documents the format; everything else in the directory is
 gitignored, so your material is never published with the package.
@@ -104,9 +123,10 @@ gitignored, so your material is never published with the package.
 
 1. Unpack into a dedicated directory and open it in OpenCode.
 2. Write your topic into `research_brief.md`. The shipped file is only a format
-   example; copy `research_brief.example.md` and rewrite the mechanism, the
-   already-occupied area and the known negative evidence. Nothing is chosen for
-   you here.
+   example; copy `research_brief.example.md` and rewrite the problem, the hard
+   constraints and the known negative evidence. The reference list and
+   `materials/` are optional — see "Your own knowledge base" above. Nothing is
+   chosen for you here.
 3. Ask the Build agent: read `SETUP_PROMPT.txt` and follow it.
 4. Run `python debate_tools.py doctor` — it checks the seats against the
    running OpenCode, not just against the config file.
@@ -124,6 +144,7 @@ model_map.json       family -> real provider/model ID, produced by setup
 model_map.example.json
 research_brief.md    the background brief the seats start from (yours, gitignored)
 research_brief.example.md   the shipped template for it
+materials/           optional local papers / notes (gitignored except its README)
 prompts/proposal/    member / chair / start / round1 / deliberate / vote
 prompts/evaluate/    the same six files for evaluate mode
 prompts/solve/       the same six files for solve mode

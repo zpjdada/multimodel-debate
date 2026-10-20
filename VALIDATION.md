@@ -69,7 +69,7 @@
 
 | 通道 | 实测结果 |
 |---|---|
-| `https://arxiv.org/html/<编号>` | 15 篇清单论文全部 200，正文 111–767 KB |
+| `https://arxiv.org/html/<编号>` | 清单中 14 篇 arXiv 论文全部 200，正文 108–751 KB；编号须带版本号（v3/v4/v6），裸编号会 404。偶发 `WinError 10054` 连接重置，重试即恢复 |
 | `https://ar5iv.labs.arxiv.org/html/<编号>` | 200，老论文可用（LayerSkip 314 KB 正文）；有官方 HTML 时不必用 |
 | `https://r.jina.ai/<PDF 完整 URL>` | ACL 2025 论文 47 KB、PMLR ICML 2021 论文 46 KB、NeurIPS 2022 论文 70 KB、arXiv PDF 92 KB，均含章节与表格；公式会失真 |
 
@@ -97,3 +97,19 @@ Windows 11 + Docker Desktop（engine 27.5.1，overlayfs，WSL2 后端）。镜�
 - 容器内 uid 固定 1000；宿主 uid 不同时要用 `--user` 覆盖。
 
 记录审核只验证文件、版本、结构与计票。它不能代替查阅论文，也不能验证中转实际执行的底层权重。调用真实性要结合 `debate/logs/` 里的原始 JSON 事件流（含 `sessionID`、`model`、工具调用与结果）检查。
+
+## 2026-10-20 文献入口与知网实测
+
+发布前重查了 `research_brief.md` 那张表的每条入口，以及"让席位自己查中文文献"这条路是否可行：
+
+| 检查项 | 结果 |
+|---|---|
+| 14 条 arXiv 编号（`api/query?id_list=` 批量查询） | 全部返回条目标题与清单一致；其中 5 条只有 `v3`/`v4`/`v6` 版本存在，不带版本号的裸编号查不到 |
+| 2 条非 arXiv 入口（`ACL 2025.acl-long.1525`、`PMLR v139 song21a`） | 未核验。清单里"均已逐条核对存在"的说法对这两条不成立，已改写为不作担保 |
+| `arxiv.org/html/<编号>` 逐条抓取 | 14 篇全部 200；4 次遇到 `WinError 10054` 连接重置，重试后全部恢复 |
+| `https://kns.cnki.net/kns8s/AdvSearch` | 返回"安全验证"页，无检索结果 |
+| `https://r.jina.ai/https://kns.cnki.net/kns8s/...` | transport error，拿不到内容 |
+
+结论：知网在工具侧没有可用通道，检索页有验证、正文另有登录与机构订阅校验，席位既搜不到也读不了。因此知网文献只能由使用者下载后放进 `materials/`；`.caj` 需先转 PDF 或纯文本，扫描件无文字层时还要附 `.txt`。这条限制已写进 `research_brief.example.md` 第 5 节、三份 README/安装提示词与 `materials/README.md`。
+
+同一次检查还发现示例文件的两处缺陷：节号引用指向不存在的"第 3、7–10 节"，第 5 段与第 11 段互相矛盾（一处写"照结构重写"，一处写"第 7 段换成问句"）；标题里的"十模型"与实际席位数无关。示例文件已按"模式无关骨架 + 三模式各自补充"重写为 8 节。
