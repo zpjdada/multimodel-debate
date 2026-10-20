@@ -1,5 +1,9 @@
 # OpenCode 多模型讨论启动包
 
+<p align="center">
+  <img src="assets/cover-titled.png" alt="Agent 赛博辩论会：多个机器人席位围着一张圆桌，有的在检索，有的在思考，有的在陈述，有的在投票" width="100%">
+</p>
+
 用 OpenCode 中已配置的模型，组织多轮检索、互评和投票。目前设计了三类任务：围绕一个研究方向找新方案、针对一个具体问题形成结论，或用给定的问题和知识库讨论出能执行的解法。
 
 项目包含配置生成器、主持和成员提示词、研究背景模板，以及讨论记录审核工具。模型调用由 OpenCode 执行，直接复用已有的供应商配置，无需另填 API key。
@@ -116,6 +120,43 @@ python debate_tools.py setup --mode solve
 
 子 Agent 的会话不会自动互通。主持会把此前各轮的完整发言整理成统一资料包，供后续互评和投票使用。
 
+## 目录结构
+
+```text
+roles.json          席位表：id、family、role、focus，恰好一个 "chair": true
+protocol.json       mode（proposal | evaluate | solve）、rounds 和 threshold
+model_map.json      系列 -> 实际 provider/model ID，由 setup 生成
+model_map.example.json
+research_brief.md   席位起步用的研究背景（你自己的，已 gitignore）
+research_brief.example.md   它的模板
+materials/          可选的本地论文/笔记（除 README 外已 gitignore）
+prompts/proposal/   member / chair / start / round1 / deliberate / vote
+prompts/evaluate/   evaluate 模式的同六个文件
+prompts/solve/      solve 模式的同六个文件
+templates/          candidates.example.json、conclusions.example.json、solutions.example.json
+debate_tools.py     setup、freeze、audit、doctor
+run_debate.py       驱动：每轮每个席位一个真实会话
+test_tools.py       离线测试，只用合成 ID
+.opencode/skills/source-search/SKILL.md   没有 websearch 时席位怎么检索
+Dockerfile          可选镜像
+docker-compose.yml  可选容器运行
+.env.example        容器从这里找到你的配置目录
+assets/             封面图及其生成脚本
+```
+
+按机器生成、不进入仓库的：`opencode.json`、`roster.lock.json`、`model_map.json`、`research_brief.md` 和 `debate/`。
+
+## 运行要求
+
+- OpenCode v2，至少一个可用的 provider/model，以及你打算用到的其余 provider。
+- Python 3.9+（只用标准库，不需要安装依赖）。
+
+## 它不做什么
+
+- 它不替你产出研究结果，包里没有任何现成答案。
+- 它不模拟席位。某个席位失败了会记为失败，不会拿另一个模型顶替。
+- 票数不是证据。同系列席位是各自独立的会话，但它们的判断并不统计独立；某个模型 ID 也证明不了背后实际是哪个权重在回答。
+
 ## 修改配置
 
 配置主要由以下三个文件控制。修改后，需要删除旧的 `opencode.json` 和 `roster.lock.json`，再运行 `setup`；生成器不会覆盖已有配置。
@@ -195,7 +236,7 @@ python debate_tools.py setup --mode solve
 
 ## 命令行配置
 
-本机需要安装 OpenCode CLI 和 Python 3.10+，Python 无需额外依赖。模型凭据沿用 OpenCode 的现有配置。
+本机需要安装 OpenCode CLI 和 Python 3.9+，Python 无需额外依赖。模型凭据沿用 OpenCode 的现有配置。
 
 ```powershell
 opencode models
@@ -305,6 +346,18 @@ python debate_tools.py audit
 缺票、对同一候选重复投票、资料版本变化、配置模型与席位表不一致等问题，都会阻止审核通过。审核器检查的是记录和票数；引用是否准确，需要结合原文判断。核对模型调用时，可查看 `debate/logs/` 中的 `sessionID`、`model`、工具调用和结果，而不能仅凭角色自述确认后端。
 
 阅读结果时，建议连同推荐理由、与最相近论文的差异、尚未解决的问题一起看。讨论过程不会启动 GPU 训练，选定方向后再安排最小实验。
+
+## 测试
+
+运行离线测试：
+
+```text
+python -B -m unittest test_tools
+```
+
+65 个测试全部离线、全部使用合成数据：假模型 ID、假发言、`example.invalid` 链接。检查的内容包括：缺票不会缩小分母、改过的资料包或配置会被拒绝、冻结后改门槛会被拒绝、两轮和三轮都能走完、缺中间轮或没有记录检索会阻止冻结、7 席位 5/7 的情况能走完，以及 `partial` 会被记录而不是被默默接受。其中 16 个 `evaluate` 用例锁定第二种模式：6/10 通过、5/10 不通过、一张票选两条结论会被拒绝、置信度下限会生效、拿错目录文件时报错会指出正确文件名、冻结后改模式会被拒绝、切模式会重算默认门槛。13 个 `solve` 用例锁定第三种：8/10 采纳、7/10 不采纳、一张票可以同时采纳多个方案、可靠性下限会生效、缺 `soundness_score` 的提案式选票会被拒绝、`preferred_solution` 必须是被采纳的方案之一、资料包里渲染的是“方案目录”而不是提案措辞、solve 与 evaluate 互切时 8/10 ↔ 6/10 会重算、`audit` 打印的是该模式自己的键、`repair` 提示词只问当前轮确实存在的字段。另有 4 个 `PromptRenderTests` 守住席位直接读的那几个文件：`start.md`、`round1.md`、`deliberate.md`、`vote.md` 里不能残留 `{{TOKEN}}`，有一个时 `setup` 会拒绝写配置，`vote.md` 里写死的评分下限必须和 `MODES["solve"]["score_floor"]` 一致。
+
+这些测试不会告诉你某篇论文是否存在。
 
 ## 验证记录与参考文档
 

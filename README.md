@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/cover-titled.png" alt="Cover: five robot seats around a round table — one reading documents, two thinking, the centre one making the case, one holding a vote token" width="100%">
+</p>
+
 # A multi-round, multi-seat research debate harness for OpenCode
 
 This package makes several real model seats — each its own OpenCode agent and
@@ -197,6 +201,8 @@ debate_tools.py      setup, freeze, audit, doctor
 run_debate.py        driver: one real session per seat, per round
 test_tools.py        offline tests, synthetic IDs only
 .opencode/skills/source-search/SKILL.md   how a seat retrieves without websearch
+.github/workflows/tests.yml  runs the offline suite on 3.9 and 3.12
+assets/              the cover image, its SVG source and the generator
 Dockerfile           optional container image
 docker-compose.yml   optional container run
 .env.example         where the container finds your config directory

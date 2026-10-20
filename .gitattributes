@@ -1,0 +1,12 @@
+# Normalise line endings on commit so the tree is one format regardless of the
+# contributor's core.autocrlf. Windows scripts keep CRLF; everything else is LF.
+* text=auto eol=lf
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.caj binary

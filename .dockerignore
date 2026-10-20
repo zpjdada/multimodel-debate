@@ -26,7 +26,6 @@ materials/
 research_brief.md
 
 # local paths and the fallback config dir
-.env
 .opencode-config/
 .opencode-data/
 
