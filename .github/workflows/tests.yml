@@ -11,8 +11,11 @@ permissions:
 
 jobs:
   offline-tests:
-    name: offline tests (py${{ matrix.python }})
+    name: offline tests (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
       matrix:
