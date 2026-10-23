@@ -13,6 +13,7 @@ materials/*
 
 # the topic you actually run is yours, not the package's
 research_brief.md
+HANDOFF.md
 
 # docker: local paths in .env, and the fallback config dir
 .env

@@ -113,3 +113,26 @@ Windows 11 + Docker Desktop（engine 27.5.1，overlayfs，WSL2 后端）。镜�
 结论：知网在工具侧没有可用通道，检索页有验证、正文另有登录与机构订阅校验，席位既搜不到也读不了。因此知网文献只能由使用者下载后放进 `materials/`；`.caj` 需先转 PDF 或纯文本，扫描件无文字层时还要附 `.txt`。这条限制已写进 `research_brief.example.md` 第 5 节、三份 README/安装提示词与 `materials/README.md`。
 
 同一次检查还发现示例文件的两处缺陷：节号引用指向不存在的"第 3、7–10 节"，第 5 段与第 11 段互相矛盾（一处写"照结构重写"，一处写"第 7 段换成问句"）；标题里的"十模型"与实际席位数无关。示例文件已按"模式无关骨架 + 三模式各自补充"重写为 8 节。
+# Docker validation — 2026-10-22
+
+- Docker Desktop Linux engine: 27.5.1; image: OpenCode 2.0.30 / Python 3.11.2.
+- Fresh build succeeded. npm platform binary downloads took about 13 minutes;
+  the earlier five-minute shell timeout was insufficient. Build-time HTTP/HTTPS
+  proxy arguments were used; subsequent rebuilds reused the installation cache.
+- A dedicated temporary project and Compose project name isolated checks from
+  existing debate records. Container setup generated ten seats across six model
+  IDs, and all doctor checks passed.
+- All 65 offline tests passed inside the image without a project mount.
+- Six configured model IDs each returned `DOCKER_OK` through container OpenCode,
+  with exit code 0. This verifies API connectivity, not a complete debate or
+  retrieval quality. The actual user topic has not been run.
+- Fixed: setup/doctor now use an on-demand profile, so default `up` starts only
+  the harness. Archive exclusion no longer removes `debate_tools.py` from the
+  build context. HANDOFF is excluded from the image.
+- Fixed: the host's `service.json` carried a loopback proxy that failed inside
+  Docker. The entrypoint now imports provider configuration from a read-only
+  source into container runtime storage, skipping host service settings. All
+  six API checks passed with direct container egress after this change. Host
+  provider and proxy configuration was not modified.
+
+---

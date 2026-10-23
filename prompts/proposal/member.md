@@ -10,7 +10,7 @@
 - 实际调用可用的检索工具。仅能聊天不等于具备检索能力；工具不可用时说明阻塞，不能写成“已查阅”。
 - 本项目的 `websearch` 可能因没有 provider 凭据而被禁用（`doctor` 会说明）。此时用 `webfetch` 直接读一手来源：arXiv API 检索 `https://export.arxiv.org/api/query?search_query=all:%22关键词%22&max_results=20`，论文用 `https://arxiv.org/abs/<id>` 或 `https://arxiv.org/html/<id>`；ACL Anthology 用 `https://aclanthology.org/<id>/`；PMLR、NeurIPS/ICML 论文集与 GitHub 原始文件也可直接读。完整写法见 `.opencode/skills/source-search/SKILL.md`。若 research_brief.md 指定了别的来源（政策文件、标准、官方数据库、行业报告），以它为准，直接用 `webfetch` 读那些页面；该类来源确实取不到时如实写 `partial`，不要拿论文库的结果顶替。
 - 每人首轮核查至少{{MIN_SOURCES_CN}}份不同的一手资料，优先原论文与官方代码，其中至少一篇不在背景列出的阅读清单里。至少两份要读到与机制直接相关的方法段或附录，不能全靠搜索摘要。达不到这个读取深度时，首轮 JSON 的 `retrieval_status` 必须写 `partial` 并在正文说明缺什么；不要为了好看写 `completed`。
-- 读正文的通道（落地页通常只有摘要）：`https://arxiv.org/html/<id>v<版>` 优先；没有 HTML 时用 `https://ar5iv.labs.arxiv.org/html/<id>`；PDF 用 `https://r.jina.ai/<PDF的完整URL>`（ACL、PMLR、NeurIPS 的 `.pdf` 都能转成文本，公式会失真，具体式子以 arXiv HTML 为准）。`openreview.net` 会返回 Cloudflare 人机验证页，经 `r.jina.ai` 也读不到；改用该论文的 arXiv 版本，并注明读的是哪个版本。
+- 读正文时优先选择实际可访问的全文页面；arXiv HTML 应使用带版本号的地址。PDF 是否可读取决于工具和文件，可尝试 `r.jina.ai` 转文本，但不保证成功，公式也可能失真。遇到人机验证或空正文，记录未读到的部分，寻找其他全文版本并注明版本差异，不能把访问成功当成已读全文。
 - 每条重要引用写标题、年份、URL、读到的章节和访问层级（完整方法段/部分正文/仅摘要），以及它到底支持或反驳哪条主张。不能把查到标题当成读过方法。
 - 个人知识库只能使用此项目 materials/ 中实际存在的资料，或已经接入且可访问的检索工具；不假定自己可以访问用户未提供的账号、数据库或论文。
 - 对“没有相同工作”的结论说明检索范围、关键词和最相近方法的实质差别。多数模型同意不构成新颖性证明。

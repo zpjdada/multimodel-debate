@@ -25,7 +25,7 @@ RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g; s|security.debian.org|${DEBIAN_
  && apt-get install -y --no-install-recommends ca-certificates git python3 \
  && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g "@opencode/cli@${OPENCODE_VERSION}" \
+RUN npm install --loglevel=info -g "@opencode/cli@${OPENCODE_VERSION}" \
  && opencode --version \
  && python3 --version \
  && rm -rf /root/.npm

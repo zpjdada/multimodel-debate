@@ -109,7 +109,7 @@ https://r.jina.ai/https://proceedings.mlr.press/v139/song21a/song21a.pdf
 ```
 返回 Markdown 化的正文，含章节标题、表格与部分公式（公式会失真，涉及具体式子时
 以 arXiv HTML 为准）。**这是读非 arXiv 论文与机构 PDF 的通用途径。**
-若目标 URL 是摘要页而不是 PDF，转出来也只有摘要，务必拼 `.pdf`。
+若目标 URL 是摘要页，转换不会自动得到全文。应从页面上的链接获取真实 PDF 地址，不要盲目在 URL 后拼 `.pdf`。
 
 ### 4. 兜底：只拿到元数据时
 
@@ -122,7 +122,7 @@ https://r.jina.ai/https://proceedings.mlr.press/v139/song21a/song21a.pdf
   当作已读，改用该论文在 arXiv 的预印本，并注明读的是哪个版本。
 - 知网（`kns.cnki.net`）检索页停在安全验证，正文还要求登录与机构订阅；经 `r.jina.ai`
   走同一地址为 transport error。需要中文文献时请使用者自行下载到 `materials/`。
-- `webfetch` 不能直接读 PDF（`Unsupported fetched file content type: application/pdf`），
-  必须先经 `r.jina.ai` 转文本。
+- 此前 `webfetch` 直接读 PDF 曾报 `Unsupported fetched file content type: application/pdf`。
+  若当前工具仍不支持，可尝试 `r.jina.ai` 或其他可读全文版本；转换服务也可能失败。
 - `api.semanticscholar.org` 常返回 429。
-- 扫描版 PDF 没有文字层时，转出来是空的。遇到空正文要如实报告，不能当作读过。
+- 扫描版 PDF 依赖图像/OCR 能力，普通文本提取可能为空。遇到空正文要如实报告，不能当作读过；必要时请用户提供文字稿。

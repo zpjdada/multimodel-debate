@@ -15,7 +15,34 @@ fi
 # with "Background service failed to start".
 mkdir -p "$OPENCODE_CONFIG_DIR" "$XDG_DATA_HOME" "$XDG_STATE_HOME" 2>/dev/null || true
 
-if [ ! -f opencode.json ]; then
+# Reuse provider configuration, but not the host's managed-service settings:
+# service.json may contain a localhost proxy that points nowhere in Docker.
+# The source stays read-only; this copy lives only in the container's writable
+# layer, never in the image or the host project.
+if [ -n "${OPENCODE_CONFIG_SOURCE:-}" ]; then
+    python3 - <<'PY'
+import os
+from pathlib import Path
+import shutil
+
+source = Path(os.environ["OPENCODE_CONFIG_SOURCE"])
+target = Path(os.environ["OPENCODE_CONFIG_DIR"])
+if not source.is_dir() or not any(source.iterdir()):
+    raise SystemExit("OpenCode configuration source is empty; check OPENCODE_CONFIG in .env")
+if source.resolve() == target.resolve():
+    raise SystemExit("OpenCode configuration source and runtime directory must differ")
+for item in source.iterdir():
+    if item.name == "service.json":
+        continue
+    dest = target / item.name
+    if item.is_dir():
+        shutil.copytree(item, dest, dirs_exist_ok=True)
+    else:
+        shutil.copy2(item, dest)
+PY
+fi
+
+if [ "${2:-}" = "run_debate.py" ] && [ ! -f opencode.json ]; then
     echo "No opencode.json in /work." >&2
     echo "Run setup first:" >&2
     echo "  docker compose run --rm setup" >&2

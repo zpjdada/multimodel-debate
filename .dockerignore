@@ -19,11 +19,13 @@ model_map.json
 
 # debate transcripts and results
 debate/
-debate_*/
+debate_*/**
 materials/
 
 # the real topic brief stays on the host; the image gets the example
 research_brief.md
+HANDOFF.md
+VIDEO_SCRIPT_zh.md
 
 # local paths and the fallback config dir
 .opencode-config/

@@ -1,5 +1,7 @@
 请帮我配置当前目录中的多模型科研讨论组。先读 README_zh.md、roles.json、protocol.json、research_brief.md 和 debate_tools.py 的参数说明。本次只安装/检查项目配置，不启动讨论。
 
+若用户指定 Docker：由宿主机上的普通 OpenCode 代理执行 Docker 命令，讨论席位在容器中运行。下面的题目确认、模型选择和配置保护规则仍然适用，但模型清单、setup 和 doctor 都必须在容器内检查，不要以宿主机检查成功替代容器检查。先确认 Docker Desktop/Engine 可用，按 .env.example 设置用户指定的 OpenCode 配置目录，然后运行 docker compose build。模型列表用 docker compose run --rm setup models；确认映射后用 docker compose run --rm setup setup --mapping model_map.json --non-interactive（按已确认模式加 --mode），检查用 docker compose run --rm doctor。setup 和 doctor 是按需工具服务，不随默认 up 启动。配置通过后，下一步命令是 docker compose up harness；只有用户要求开始讨论时才执行。不要在没有轮次记录和目录时提前 freeze，驱动会在归并后自动冻结。
+
 0. `research_brief.md` 是本次要讨论的题目背景。若它只有示例内容、或根本不存在，先复制 `research_brief.example.md` 为 `research_brief.md`，然后**停下来问我题目**：需要我提供要解决的问题、资源与权限边界、已知负面结论。不要自己编造研究背景，也不要替我选题目。若我已在 `research_brief.md` 里写好内容，直接沿用。
 
    文献线索和 `materials/` 下的补充材料都是可选的，不要为了"填满"而替我编。如果我说想预置一批文献，就把题名、发表处、带版本号的编号（如 `2404.16710v4`）和正文可读路径写进简报的"可选一"那节；如果我有席位拿不到的本地材料（付费论文集、中文文献、内部笔记），提醒我放进 `materials/` 并在"可选二"那节列一张表。知网（CNKI）目前读不到——检索页停在安全验证，正文还要求登录和机构订阅；要我提供中文文献时，说清需要我自己下载并转成 PDF 或纯文本，`.caj` 席位读不了。
@@ -13,12 +15,12 @@
 1. 使用本机已经安装的 OpenCode 和已经配置好的供应商。运行 opencode models 取得真实的 provider/model ID，不读取或展示 API key，不另建供应商。若命令不在 PATH，尝试定位已安装 CLI 的完整路径，给脚本 models/setup 加 --opencode "实际CLI路径"；也可以用完整路径的 CLI 导出模型列表后走 --inventory。不要猜模型 ID。
 2. `roles.json` 是席位表，随包默认是六系列十席位：A 系列两席、B 系列两席、C 系列两席、D 系列两席、E 系列一席、F 系列一席。其中带 `"chair": true` 的 a05（C 系列）兼任主持，agent 名为 debate-chair；其余席位是 subagent 模式的独立 Agent（debate-<id>），不增加额外投票席位。系列名只是占位符，实际对应哪个模型由 model_map.json 决定。若用户改过 roles.json，以文件为准：席位数、系列与主持都由它决定，不要按这里的默认数字写死。
 
-   主持的模型应优先选上下文最长、在长资料包上最不容易丢细节的那个，而不是最会提案的那个：它的活儿是把九份首轮原文、十份互评和证据链接忠实转述成可投票的候选。默认 a05 与 a06 同属 C 系列、共用同一个模型 ID，会把"什么算新"的偏差写进两个席位；映射模型时如果本机有更合适的长上下文模型，可以建议给 a05 单独写 `"model"` 覆盖，但由我决定，不要擅自改。
+   主持优先看足够的上下文容量、忠实归并与指令遵循能力：它需要整理包括自己在内的全部席位原文（默认十份首轮发言）、互评和证据链接。默认 a05 与 a06 共用 C 系列模型；可以建议给 a05 单独写 `"model"`，但由用户决定。已知生成器限制：不要让主持所在系列所有席位都使用 model 覆盖；保留该系列映射并让至少一个席位使用它。
 3. 用 python debate_tools.py models 检查识别结果，再用 python debate_tools.py setup --non-interactive 生成配置。Python 也可用 python3 或 py -3。若多个候选或供应商自定义别名导致无法唯一映射，只根据实际模型列表和本机已有模型显示名确认；把每个系列一个完整 ID 写入 model_map.json，再执行 python debate_tools.py setup --mapping model_map.json --non-interactive。不要因 ID 不明就让所有 Agent 继承当前默认模型。确实无法确认时仅询问缺少的模型 ID，不索要密钥。
 4. 如果 CLI 形式不方便，可以先在当前目录用 opencode models | Set-Content -Encoding utf8 models.txt 保存列表，再给脚本加 --inventory models.txt。生成器不调用模型 API，不开始讨论。
 5. 这个包应在专用目录使用；已有 opencode.json/jsonc 时不覆盖它。不要修改我的全局供应商配置、auth.json 或 CC Switch 配置。
 6. 生成配置必须是 V2 原生形状：顶层 `agents` 与 `commands`，权限是 `permissions` 规则数组（最后一条命中者生效）。不要再生成 V1 的 `agent`/`command`/`permission` 键，否则 OpenCode 会报废弃警告。每个角色各一个 Agent，恰好一个 primary（debate-chair），其余为 subagent；model 字段都明确绑定实际 ID；subagent 不能再派生其他 Agent（权限里 subagent deny）。
 7. 运行 python debate_tools.py doctor。它会用 opencode debug agents 核对：席位是否真的被运行时加载、模型是否与 roster.lock.json 一致、mode 是否正确、是否恰好一个 primary、成员 websearch/webfetch/skill 权限、以及 websearch 配置与实际 provider 凭据是否相符。任何一项失败都要先修好，不要跳过。
-8. 检索通道：OpenCode 内置 websearch 需要已连接的搜索 provider 凭据。没有凭据时 `setup` 默认 `--search off`，权限里 deny websearch，席位改走 webfetch：arXiv API 与 OpenAlex 检索论文，arXiv HTML / ar5iv 读正文，`r.jina.ai` 把任意 PDF 转成文本；题目不是论文类时直接读 research_brief.md 指定的页面（政策文件、标准、官方数据库、行业报告）。见 .opencode/skills/source-search/SKILL.md。若本机已 /connect 了 Exa/Tavily/Firecrawl/Parallel/TinyFish 之一，用 `--search on` 重新生成。
+8. 检索通道：没有搜索 provider 凭据时保持默认 `--search off`，席位通过 webfetch 访问可用的一手来源。论文可用 arXiv API、OpenAlex 及实际可读的全文；PDF 可尝试 r.jina.ai 转文本，但不保证成功。非论文题目按 research_brief.md 指定的政策、标准、官方数据库或行业报告检索。工具受阻要如实记录。见 .opencode/skills/source-search/SKILL.md。若已连接搜索 provider，可用 `--search on` 配置。
 
 最后只给我实际席位/模型映射表、模式（`protocol.json` 的 mode）、轮数（`rounds`）、门槛（`threshold`）、doctor 的结论，以及下一步应运行哪条命令。不要声称讨论已运行，也不要伪造讨论结果。

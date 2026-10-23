@@ -34,13 +34,17 @@ x-opencode-volumes: &opencode-volumes
   # No fallback on purpose. A missing .env would otherwise bind an empty
   # directory here and every command would fail later with a provider error
   # that says nothing about the real cause.
-  - ${OPENCODE_CONFIG:?set OPENCODE_CONFIG in .env (copy .env.example first)}:/home/debate/.config/opencode:ro
+  - ${OPENCODE_CONFIG:?set OPENCODE_CONFIG in .env (copy .env.example first)}:/mnt/opencode-config:ro
   - opencode-state:/home/debate/.local/share
   - opencode-state:/home/debate/.local/state
 
 x-opencode-env: &opencode-env
   HOME: /home/debate
   OPENCODE_CONFIG_DIR: /home/debate/.config/opencode
+  OPENCODE_CONFIG_SOURCE: /mnt/opencode-config
+  HTTP_PROXY: ${DEBATE_HTTP_PROXY:-}
+  HTTPS_PROXY: ${DEBATE_HTTPS_PROXY:-}
+  NO_PROXY: ${DEBATE_NO_PROXY:-localhost,127.0.0.1,::1}
   XDG_DATA_HOME: /home/debate/.local/share
   XDG_STATE_HOME: /home/debate/.local/state
 
@@ -63,23 +67,25 @@ services:
     tty: true
 
   setup:
+    profiles: [tools]
     build: *build
     user: "1000:1000"
     working_dir: /work
     volumes: *opencode-volumes
     environment: *opencode-env
-    entrypoint: ["python3", "debate_tools.py"]
+    entrypoint: ["/usr/local/bin/debate-entrypoint", "python3", "debate_tools.py"]
     command: ["setup", "--non-interactive"]
 
   # `doctor` lives in debate_tools.py, not in run_debate.py, so it gets its own
   # entrypoint rather than a subcommand of the harness service.
   doctor:
+    profiles: [tools]
     build: *build
     user: "1000:1000"
     working_dir: /work
     volumes: *opencode-volumes
     environment: *opencode-env
-    entrypoint: ["python3", "debate_tools.py"]
+    entrypoint: ["/usr/local/bin/debate-entrypoint", "python3", "debate_tools.py"]
     command: ["doctor"]
 
 volumes:
