@@ -26,6 +26,7 @@ materials/
 research_brief.md
 HANDOFF.md
 VIDEO_SCRIPT_zh.md
+videos/
 
 # local paths and the fallback config dir
 .opencode-config/

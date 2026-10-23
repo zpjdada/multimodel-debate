@@ -15,6 +15,9 @@ materials/*
 research_brief.md
 HANDOFF.md
 
+# local recordings, subtitles and review notes
+/videos/
+
 # docker: local paths in .env, and the fallback config dir
 .env
 .opencode-config/
