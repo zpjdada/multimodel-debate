@@ -137,7 +137,7 @@ prompts/evaluate/   evaluate 模式的同六个文件
 prompts/solve/      solve 模式的同六个文件
 templates/          candidates.example.json、conclusions.example.json、solutions.example.json
 debate_tools.py     setup、freeze、audit、doctor
-run_debate.py       驱动：每轮每个席位一个真实会话
+run_debate.py       驱动：每席一个真实会话，跨轮续接
 test_tools.py       离线测试，只用合成 ID
 .opencode/skills/source-search/SKILL.md   没有 websearch 时席位怎么检索
 Dockerfile          可选镜像
@@ -293,6 +293,17 @@ python run_debate.py final                 # 生成 final.md
 ```
 
 只有 `all`、`round1`、`deliberate`、`vote` 支持 `--resume`，按文件是否存在跳过席位，并不保证该文件合格，也不能绕过冻结版本检查。`round1`、`deliberate` 和 `vote` 还支持 `--seats a01,a03`，便于选少量席位检查格式和检索。
+
+### 席位会话与职责边界
+
+- 驱动将 CLI 实际返回的 `sessionID` 保存到 `debate/sessions/aXX.json`，后续调用自动传 `--session` 续接该席位，并显式指定其配置模型。会话续接不依赖 `--resume`；后者只控制跳过已有发言文件。不同席位使用不同会话，同轮并发不会覆盖彼此的会话记录。
+- 主持的独立发言、归并、投票和总结也续接其自己的会话。`all --resume` 遇到已有冻结资料时，校验其内容后跳过归并，避免把已投票或看过结果的主持带回归并阶段。会话进入后续阶段后，不能重跑更早的研究轮次；元数据修复仍由原席位处理。
+- API 失败或超时的部分输出只要含真实 sessionID，也会保存供重试。强制终止整个 Python 进程可能来不及保存；旧版没有会话记录的场次不能自动冒充持续会话。缺记录时恢复对应的 `debate/sessions/`，否则另开新场次，不使用“最近会话”猜测归属。
+- 会话文件只保存绑定，不包含 OpenCode 会话数据库。换机器或删除数据库后，仅复制这些 JSON 不会恢复历史；CLI 的 `--session` 可能重新创建不存在的 ID，故须同时保留 OpenCode 状态。上下文压缩也可能摘要化旧工具结果，重要证据仍须写入公开发言。
+- 配置、背景或目录改变时，原会话绑定不再适用。换题先归档整个 `debate/`。同一场次只运行一个驱动进程，`--parallel` 用于该进程内的席位并发。
+- 外层操作代理负责 setup、doctor、启动和故障处理；正式主持只完成当前调用指定的研究、归并、投票或总结。Python 负责保存成员的“Markdown 正文＋JSON 元数据”、冻结和计票；不要求改为独立元数据文件。
+
+升级包后，既有 `opencode.json` 内嵌的是旧提示词。新场次需先备份并移出旧生成配置和旧 `debate/`，再按原映射执行 setup 与 doctor，让新主持提示词生效。
 
 同一轮内可用 `--parallel N` 控制并发数，默认是 4，设为 1 时串行运行。轮次之间按顺序执行；同轮主持可与其他席位并行。禁止读取同轮记录是提示词约束，不是文件系统隔离。两轮模式跳过 deliberate，四轮模式需在 merge 前依次执行 deliberate --round 2 和 deliberate --round 3。
 

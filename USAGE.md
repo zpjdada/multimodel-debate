@@ -9,7 +9,7 @@
 This package makes several real model seats — each its own OpenCode agent and
 session — independently search the literature, read each other's full text
 across rounds, and then vote on a frozen catalog. Every seat is a separate
-`opencode run` session with no shared context; files under `debate/` are the
+`opencode run` session resumed across rounds, with no cross-seat shared context; files under `debate/` are the
 only channel between them. It runs in three switchable modes: find new research
 directions (`proposal`), settle a given question by majority (`evaluate`), or
 work out a solution to a stated problem with your own knowledge base (`solve`).
@@ -201,7 +201,7 @@ prompts/evaluate/    the same six files for evaluate mode
 prompts/solve/       the same six files for solve mode
 templates/           candidates.example.json, conclusions.example.json, solutions.example.json
 debate_tools.py      setup, freeze, audit, doctor
-run_debate.py        driver: one real session per seat, per round
+run_debate.py        driver: one real session per seat, resumed across rounds
 test_tools.py        offline tests, synthetic IDs only
 .opencode/skills/source-search/SKILL.md   how a seat retrieves without websearch
 .github/workflows/tests.yml  runs the offline suite on 3.9 and 3.12
@@ -354,6 +354,38 @@ python run_debate.py final
 This does not validate those files or make a changed frozen packet resumable. `round1`,
 `deliberate` and `vote` also accept `--seats a01,a03` for a cheap format and
 retrieval probe.
+
+### Persistent sessions and operator responsibilities
+
+The driver stores the CLI's actual session ID in `debate/sessions/aXX.json`
+and passes `--session` and the configured model on subsequent calls. This is
+automatic; `--resume` only skips existing speech files. Seats have distinct
+sessions, including when running concurrently. The chair reuses its own session
+for research, merging, voting and the final report. `all --resume` validates an
+existing frozen packet and skips merging rather than taking a chair that has
+already voted back to a pre-vote stage. Earlier research stages cannot be replayed
+after later stages; metadata repair remains the original seat's responsibility.
+
+Failed calls and timeouts retain any real session ID present in their output.
+A hard process termination may prevent persistence. Missing session records are
+an error, not an excuse to silently start a replacement session: restore the
+records or start a new debate. The JSON files are bindings, not OpenCode database
+backups. Preserve OpenCode's state too: `--session` may recreate a missing ID,
+which does not restore its history. Context compaction can summarize old tool
+results, so important evidence still belongs in public speeches.
+
+Changed backgrounds, configuration or project locations invalidate the binding.
+Archive the entire `debate/` directory before a new topic. Use one driver process
+per debate; `--parallel` handles concurrency within it.
+
+The outer operator handles setup, doctor, startup and recovery. The formal chair
+handles only the research, merge, vote or report stage requested by the driver.
+Python saves the unchanged Markdown-plus-JSON speeches, freezes the packet and
+tallies votes. Separate metadata files are not required.
+
+Existing `opencode.json` files embed old prompts. For a new run after upgrading,
+back up and move the old generated configuration and `debate/` out, then rerun
+setup with your mapping and doctor to activate the updated prompts.
 
 Seats inside one round run in parallel: `--parallel N` (default 4, `1` for
 serial). Run `deliberate --round 2` only when rounds ≥ 3; for four rounds also

@@ -484,7 +484,7 @@ def make_config(root, mapping, search=True, protocol=None):
     for name in ("member.md", "chair.md", "start.md", "round1.md", "deliberate.md", "vote.md"):
         if not (prompts / name).exists():
             raise ValueError("缺少 " + str(prompts / name) + "：该模式的提示词不完整，请检查安装目录。")
-    # member.md 与 chair.md 会被渲染进 system prompt；其余四个由席位在轮次中直接读磁盘，
+    # member.md 与 chair.md 会被渲染进 system prompt；其余四个由操作代理或席位直接读磁盘，
     # 程序不会替它们替换占位符，写进去就会原样落到提示词里。这里提前拦住。
     for name in ("start.md", "round1.md", "deliberate.md", "vote.md"):
         text = (prompts / name).read_text(encoding="utf-8-sig")
@@ -516,9 +516,9 @@ def make_config(root, mapping, search=True, protocol=None):
               "model": mapping[chair_role["family"]],
               "agents": agents,
               "commands": {"debate-start": {
-                  "description": f"{values['SEAT_COUNT_CN']}席位{values['ROUNDS_CN']}轮科研讨论：检索、互评、独立投票",
-                  "agent": "debate-chair", "subagent": False,
-                  "template": f"请读取 {mode['prompts_dir']}/start.md，并按其内容开始并完成全部轮次的多席位讨论。"}}}
+                   "description": f"由外层操作代理启动{values['SEAT_COUNT_CN']}席位{values['ROUNDS_CN']}轮科研讨论",
+                   "agent": "build", "subagent": False,
+                   "template": f"你是外层操作代理，不是正式讨论席位。请读取 {mode['prompts_dir']}/start.md，按其内容调用驱动完成讨论。"}}}
     return config, locked
 
 

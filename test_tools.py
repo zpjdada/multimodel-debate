@@ -8,6 +8,9 @@ import re
 import shutil
 import tempfile
 import unittest
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 import debate_tools as d
 import run_debate
@@ -15,14 +18,18 @@ import run_debate
 
 FAKE_IDS = ["mock/family-a", "mock/family-b", "mock/family-c",
             "mock/family-d", "mock/family-e", "mock/family-f"]
+FAKE_ROLES = [{"id": f"a{i:02d}", "family": "family_" + family,
+               "role": "Synthetic researcher", "focus": "Synthetic focus",
+               **({"chair": True} if i == 5 else {})}
+              for i, family in enumerate("aabbccddef", 1)]
 
 
 class ToolsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
-        shutil.copy(d.ROOT / "protocol.json", self.root / "protocol.json")
+        d.atomic_json(self.root / "roles.json", FAKE_ROLES)
+        d.atomic_json(self.root / "protocol.json", d.default_protocol(len(FAKE_ROLES)))
         shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
         (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
 
@@ -71,6 +78,18 @@ class ToolsTests(unittest.TestCase):
             self.write_deliberation(number)
         self.write_catalog()
         self.manifest = d.freeze(self.root)
+
+    def test_resume_skips_merge_and_rejects_changed_frozen_packet(self):
+        self.prepared()
+        with patch.object(run_debate, "ROOT", self.root), patch.object(run_debate, "run_agent") as call:
+            with contextlib.redirect_stdout(io.StringIO()):
+                run_debate.merge(resume=True)
+            call.assert_not_called()
+            packet = self.root / "debate/vote_packet.md"
+            packet.write_text(packet.read_text(encoding="utf-8") + "changed", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "冻结资料"):
+                run_debate.merge(resume=True)
+            call.assert_not_called()
 
     def ballots(self):
         ids = [r["id"] for r in self.roles]
@@ -431,7 +450,7 @@ class EvaluateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
+        d.atomic_json(self.root / "roles.json", FAKE_ROLES)
         shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
         d.atomic_json(self.root / "protocol.json", {"mode": "evaluate", "rounds": 3})
         (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
@@ -677,7 +696,7 @@ class SolveTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
+        d.atomic_json(self.root / "roles.json", FAKE_ROLES)
         shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
         d.atomic_json(self.root / "protocol.json", {"mode": "solve", "rounds": 3})
         (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
@@ -912,6 +931,105 @@ class SolveTests(unittest.TestCase):
         self.assertIn("投票轮元数据", last)
 
 
+class RunnerSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.roles = [
+            {"id": "a01", "agent_name": "debate-a01", "model": "mock/one"},
+            {"id": "a02", "agent_name": "debate-chair", "model": "mock/two"},
+        ]
+        d.atomic_json(self.root / "roster.lock.json", {"seats": self.roles})
+        d.atomic_json(self.root / "protocol.json", {
+            "mode": "proposal", "rounds": 3,
+            "threshold": {"numerator": 2, "denominator": 2}})
+        (self.root / "research_brief.md").write_text("Synthetic brief", encoding="utf-8")
+        self.addCleanup(patch.stopall)
+        patch.object(run_debate, "ROOT", self.root).start()
+        patch.object(run_debate, "cli", return_value="mock-cli").start()
+        self.calls = []
+
+    def events(self, sid, text="Synthetic response"):
+        return "\n".join(json.dumps(e) for e in [
+            {"type": "step_start", "sessionID": sid},
+            {"type": "text", "sessionID": sid, "part": {
+                "messageID": "msg_mock", "type": "text", "text": text}}])
+
+    def fake_cli(self, executable, args, root, timeout):
+        self.calls.append(args)
+        agent = args[args.index("--agent") + 1]
+        sid = "ses_" + agent.replace("-", "_")
+        return subprocess.CompletedProcess(args, 0, self.events(sid), "")
+
+    def invoke(self, seat="a01", label=None):
+        role = next(r for r in self.roles if r["id"] == seat)
+        return run_debate.run_agent(role["agent_name"], "Synthetic prompt", label or f"round1-{seat}")
+
+    def test_sessions_are_independent_and_persist_across_calls(self):
+        with patch.object(d, "run_cli", side_effect=self.fake_cli):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(self.invoke, ["a01", "a02"]))
+            self.assertTrue(all("--session" not in c for c in self.calls))
+            for seat in ("a01", "a02"):
+                state = d.read_json(self.root / f"debate/sessions/{seat}.json")
+                self.invoke(seat, f"round2-{seat}")
+                args = self.calls[-1]
+                self.assertEqual(args[args.index("--session") + 1], state["session_id"])
+                self.assertEqual(args[args.index("--model") + 1], state["model"])
+            self.invoke("a02", "merge")
+            self.invoke("a02", "round3-a02")
+            self.invoke("a02", "final")
+            self.assertEqual(len({c[c.index("--session") + 1] for c in self.calls[-3:]}), 1)
+            with self.assertRaisesRegex(RuntimeError, "后续阶段"):
+                self.invoke("a02", "round3-a02")
+
+    def test_failed_call_keeps_real_session_for_retry(self):
+        failed = subprocess.CompletedProcess([], 1, json.dumps({
+            "type": "error", "sessionID": "ses_debate_a01"}), "auth failed")
+        with patch.object(d, "run_cli", return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, "没有返回正文"):
+                self.invoke()
+        with patch.object(d, "run_cli", side_effect=self.fake_cli):
+            self.invoke()
+        self.assertIn("ses_debate_a01", self.calls[-1])
+
+    def test_timeout_keeps_partial_session_and_log(self):
+        partial = json.dumps({"type": "step_start", "sessionID": "ses_debate_a01"}).encode()
+        with patch.object(d, "run_cli", side_effect=subprocess.TimeoutExpired("mock", 1, output=partial)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.invoke()
+        self.assertEqual(d.read_json(self.root / "debate/sessions/a01.json")["session_id"], "ses_debate_a01")
+        self.assertTrue((self.root / "debate/logs/round1-a01.jsonl").exists())
+
+    def test_missing_or_wrong_session_is_not_silently_accepted(self):
+        with patch.object(d, "run_cli", side_effect=self.fake_cli):
+            with self.assertRaisesRegex(RuntimeError, "缺少持久会话"):
+                self.invoke(label="round2-a01")
+            self.invoke()
+        for stdout in (self.events("ses_wrong"), self.events("ses_debate_a01") + "\n" + self.events("ses_other")):
+            with patch.object(d, "run_cli", return_value=subprocess.CompletedProcess([], 0, stdout, "")):
+                with self.assertRaises(RuntimeError):
+                    self.invoke(label="round2-a01")
+        (self.root / "research_brief.md").write_text("Different topic", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "绑定"):
+            self.invoke()
+
+    def test_seats_cannot_share_session(self):
+        result = subprocess.CompletedProcess([], 0, self.events("ses_shared"), "")
+        with patch.object(d, "run_cli", return_value=result):
+            self.invoke("a01")
+            with self.assertRaisesRegex(RuntimeError, "不同席位"):
+                self.invoke("a02")
+
+    def test_response_without_session_id_is_rejected(self):
+        event = {"type": "text", "part": {"messageID": "msg_mock", "type": "text", "text": "Synthetic"}}
+        with patch.object(d, "run_cli", return_value=subprocess.CompletedProcess([], 0, json.dumps(event), "")):
+            with self.assertRaisesRegex(RuntimeError, "没有可核验"):
+                self.invoke()
+        self.assertFalse((self.root / "debate/sessions/a01.json").exists())
+
+
 class PromptRenderTests(unittest.TestCase):
     """席位直接读磁盘的四个提示词不经渲染，占位符会原样落到提示词里。
 
@@ -924,12 +1042,28 @@ class PromptRenderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        shutil.copy(d.ROOT / "roles.json", self.root / "roles.json")
+        d.atomic_json(self.root / "roles.json", FAKE_ROLES)
         shutil.copytree(d.ROOT / "prompts", self.root / "prompts")
         (self.root / "research_brief.md").write_text("Synthetic offline background, no research claims.", encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_chair_does_not_launch_or_orchestrate_the_driver(self):
+        for mode in d.MODES:
+            text = (self.root / "prompts" / mode / "chair.md").read_text(encoding="utf-8")
+            for command in ("python run_debate.py", "python debate_tools.py doctor",
+                            "python debate_tools.py freeze", "python debate_tools.py audit"):
+                self.assertNotIn(command, text)
+            self.assertIn("你只完成本次调用指定的阶段", text)
+
+    def test_start_command_targets_the_operator_in_all_modes(self):
+        roles = d.load_roster(self.root)
+        mapping = d.resolve_models(FAKE_IDS, roles)
+        for mode in d.MODES:
+            config, _ = d.make_config(self.root, mapping, protocol=d.default_protocol(len(roles), mode))
+            self.assertEqual(config["commands"]["debate-start"]["agent"], "build")
+            self.assertIn("外层操作代理", config["commands"]["debate-start"]["template"])
 
     def test_runtime_prompts_have_no_template_tokens(self):
         # 三个模式全查：solve 最先犯这个错，evaluate 的 vote.md 也一度写进 token。

@@ -3,8 +3,8 @@
 
 Why this exists: the harness `subagent` tool in OpenCode 2.0.30 fails with
 "Subagent session not found", so a chair cannot launch seats itself. This driver
-launches each seat as a real independent agent session and uses files as the only
-channel between seats. Prompts come from the current mode's directory
+launches a real independent session per seat and resumes it across rounds;
+files remain the only channel between seats. Prompts come from the current mode's directory
 (prompts/proposal/, prompts/evaluate/ or prompts/solve/); no seat is simulated.
 Seat count, chair, mode and threshold come from roles.json / protocol.json.
 Per-mode wording lives in debate_tools.MODES; nothing here branches on the mode name.
@@ -48,7 +48,74 @@ def mode():
     return d.mode_of(d.load_protocol(ROOT, len(seats())))
 
 
-LOG = ROOT / "debate/logs"
+SESSION_LOCK = threading.Lock()
+
+
+def session_ids(stdout: str) -> set:
+    """Only top-level CLI events identify the invoked session, not nested tool data."""
+    ids = set()
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(event, dict) and isinstance(event.get("sessionID"), str):
+            sid = event["sessionID"]
+            if not re.fullmatch(r"ses_[A-Za-z0-9_-]+", sid):
+                raise RuntimeError("CLI 返回了无效的 sessionID。")
+            ids.add(sid)
+    return ids
+
+
+def session_context(agent, label):
+    lock = d.read_json(ROOT / "roster.lock.json")
+    matches = [r for r in lock["seats"] if r["agent_name"] == agent]
+    if len(matches) != 1:
+        raise RuntimeError(f"无法确定 {agent} 对应的唯一席位。")
+    role = matches[0]
+    seat = role["id"]
+    path = ROOT / "debate/sessions" / (seat + ".json")
+    identity = {"seat": seat, "agent": agent, "model": role["model"],
+                "context_sha256": d.fingerprint({
+                    "root": str(ROOT.resolve()), "roster": lock,
+                    "protocol": d.read_json(ROOT / "protocol.json"),
+                    "brief": (ROOT / "research_brief.md").read_text(encoding="utf-8-sig"),
+                })}
+    rounds = d.load_protocol(ROOT, len(lock["seats"]))["rounds"]
+    match = re.fullmatch(r"round(\d+)-" + re.escape(seat), label)
+    stage = int(match[1]) * 10 if match else {
+        "merge": rounds * 10 - 5, "final": rounds * 10 + 10,
+    }.get(label)
+    with SESSION_LOCK:
+        state = d.read_json(path) if path.exists() else None
+        if state:
+            if any(state.get(k) != v for k, v in identity.items()):
+                raise RuntimeError(f"{seat} 的会话绑定与当前背景/配置不一致；请归档旧场次后重新开始。")
+            if not re.fullmatch(r"ses_[A-Za-z0-9_-]+", str(state.get("session_id", ""))):
+                raise RuntimeError(f"{path} 缺少有效 session_id。")
+            if stage is not None and stage < state.get("stage", 0):
+                raise RuntimeError(f"{seat} 会话已进入后续阶段，不能回到 {label}；请使用 --resume 跳过已有记录。")
+        elif label != f"round1-{seat}" or any((ROOT / "debate").glob(f"round*/{seat}.md")):
+            raise RuntimeError(f"{seat} 缺少持久会话记录；不能将新会话冒充跨轮续接。请恢复 debate/sessions 或另开新场次。")
+    return path, identity, state, stage
+
+
+def remember_session(path, identity, state, stage, stdout):
+    ids = session_ids(stdout)
+    if not ids:
+        return False
+    if len(ids) != 1:
+        raise RuntimeError("一次 CLI 调用返回了多个 sessionID，拒绝绑定席位。")
+    sid = ids.pop()
+    if state and state["session_id"] != sid:
+        raise RuntimeError("CLI 返回的 sessionID 与请求续接的会话不一致。")
+    with SESSION_LOCK:
+        for other in path.parent.glob("*.json"):
+            if other != path and d.read_json(other).get("session_id") == sid:
+                raise RuntimeError("不同席位不能绑定同一个 session_id。")
+        d.atomic_json(path, {**identity, "session_id": sid,
+                            "stage": max(stage or 0, (state or {}).get("stage", 0))})
+    return True
 
 
 def cli():
@@ -107,23 +174,43 @@ def tool_errors(stdout: str) -> list:
 
 def run_agent(agent: str, prompt: str, label: str, timeout: int = 3600, extra=()) -> str:
     executable = cli()
-    LOG.mkdir(parents=True, exist_ok=True)
-    result = d.run_cli(executable, ["run", "--agent", agent, "--format", "json", *extra, prompt],
-                       ROOT, timeout=timeout)
+    if any(arg in ("--session", "-s", "--continue", "-c", "--fork", "--model", "-m")
+           or arg.startswith(("--session=", "--model=")) for arg in extra):
+        raise ValueError("会话和模型由席位绑定管理，不能通过 extra 覆盖。")
+    path, identity, state, stage = session_context(agent, label)
+    log = ROOT / "debate/logs"
+    log.mkdir(parents=True, exist_ok=True)
+    args = ["run", "--agent", agent, "--model", identity["model"], "--format", "json"]
+    if state:
+        args += ["--session", state["session_id"]]
+    try:
+        result = d.run_cli(executable, [*args, *extra, prompt], ROOT, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        # subprocess may return bytes even with text=True. Keep the real session
+        # on timeouts so the next invocation can resume rather than start over.
+        stdout = exc.stdout or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        (log / (label + ".jsonl")).write_text(stdout, encoding="utf-8")
+        remember_session(path, identity, state, stage, stdout)
+        raise
     stdout = result.stdout or ""
-    (LOG / (label + ".jsonl")).write_text(stdout, encoding="utf-8")
+    (log / (label + ".jsonl")).write_text(stdout, encoding="utf-8")
     if result.stderr:
-        (LOG / (label + ".stderr.txt")).write_text(result.stderr, encoding="utf-8")
+        (log / (label + ".stderr.txt")).write_text(result.stderr, encoding="utf-8")
+    remembered = remember_session(path, identity, state, stage, stdout)
     text = last_text(stdout)
     if not text:
         raise RuntimeError(f"{label} 没有返回正文（exit {result.returncode}）："
-                           f"{(result.stderr or '')[:400]}")
+                            f"{(result.stderr or '')[:400]}")
+    if not remembered:
+        raise RuntimeError(f"{label} 返回正文但没有可核验的 sessionID，拒绝伪造持续会话。")
     if result.returncode != 0:
         # 记录但不中断：判定放在 write_seat 里，以能否解析出合格发言为准。
         print(f"  注意：{label} exit {result.returncode}，但已拿到 {len(text)} 字正文，继续。", flush=True)
         errors = tool_errors(stdout)
         if errors:
-            (LOG / (label + ".tool-errors.txt")).write_text("\n".join(errors), encoding="utf-8")
+            (log / (label + ".tool-errors.txt")).write_text("\n".join(errors), encoding="utf-8")
             print(f"  工具错误 {len(errors)} 条：{errors[0]}", flush=True)
     return text
 
@@ -210,11 +297,22 @@ def run_seats(order, work, parallel=1):
                            + "。其余席位已保存，可用 --resume 只补跑失败的席位。")
 
 
-def merge():
+def merge(resume=False):
     order = seats()
     m = mode()
     protocol = d.load_protocol(ROOT, len(order))
     vote_round = protocol["rounds"]
+    if resume and (ROOT / "debate/packet_manifest.json").exists():
+        # Do not feed the chair back into pre-vote work after it has voted or
+        # seen the final tally. Validate the frozen inputs before skipping.
+        data = d.packet_data(ROOT)
+        digest = d.fingerprint(data)
+        manifest = d.read_json(ROOT / "debate/packet_manifest.json")
+        packet = (ROOT / "debate/vote_packet.md").read_text(encoding="utf-8-sig")
+        if manifest.get("packet_sha256") != digest or packet != d.render_packet(data, digest):
+            raise RuntimeError("冻结资料已变化，不能续跑；请恢复原资料或另开新场次。")
+        print("[merge] 冻结资料已核验，跳过归并", flush=True)
+        return
     earlier = "、".join(f"debate/round{n}/" for n in range(1, vote_round))
     merges = [f"第 {n} 轮" for n in range(2, vote_round)]
     closing = m["merge_closing"].format(vote_round=vote_round)
@@ -495,7 +593,7 @@ def main():
                 return 2
             for number in range(2, vote_round):
                 deliberate(number, args.resume, None, args.parallel)
-            merge()
+            merge(args.resume)
             vote(args.resume, None, args.parallel)
             audit()
             final()
