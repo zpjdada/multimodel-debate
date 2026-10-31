@@ -15,6 +15,21 @@ official documents, standards and data through available tools when `websearch`
 is unavailable, and recording what was actually read. Python scripts handle
 round scheduling, freezing and vote counting; each mode has its own prompts.
 
+A single agent may overlook sources, miss counterexamples, or settle on a
+direction too early. This harness brings agents with different focuses together
+to divide retrieval work and cross-review findings, putting more evidence and
+disagreements on the same discussion table. You can also combine models with
+different capabilities and costs to fit your budget.
+
+**Let AI do more than answer—let agents challenge each other, too.**
+
+**Local GUI:** On Windows, double-click `START_CONSOLE.cmd` to open the console
+in your browser. Select models from your OpenCode CLI, configure seats, chair,
+mode and rounds, attach materials, then start and review the debate in one page.
+Requires Python 3.9+ and a working OpenCode V2 CLI; no Node.js, domain or hosting
+is needed. See the [console guide (Chinese)](CONSOLE.md). All seats may use the
+same model while retaining independent sessions.
+
 **Status: early experimental framework.** Built by one person with AI assistance
 to explore multi-model discussion, it has limited functionality and validated
 use cases. Existing tests are not comprehensive, and no research-grade system

@@ -126,7 +126,12 @@ def cli():
 
 
 def last_text(stdout: str) -> str:
-    """Return the text parts of the final assistant message from --format json output."""
+    """Preserve all assistant text from this invocation, including resumed fragments.
+
+    A transport retry can split one speech over multiple message IDs. Keeping
+    only the last message silently drops its mechanism and evidence. Intermediate
+    assistant prose is retained too; metadata parsing uses the last valid block.
+    """
     messages = {}
     order = []
     for line in stdout.splitlines():
@@ -146,11 +151,8 @@ def last_text(stdout: str) -> str:
             order.append(mid)
         if event.get("type") == "text" and part.get("type") == "text":
             messages[mid].append(part.get("text", ""))
-    for mid in reversed(order):
-        text = "".join(messages[mid]).strip()
-        if text:
-            return text
-    return ""
+    return "\n\n".join(text for mid in order
+                       if (text := "".join(messages[mid]).strip()))
 
 
 def tool_errors(stdout: str) -> list:

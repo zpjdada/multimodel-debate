@@ -338,8 +338,8 @@ def load_roster(root):
     ids = [r.get("id") for r in roles]
     if ids != seat_ids(len(roles)):
         raise ValueError(f"roles.json 的席位必须是从 a01 开始连续的 ID，共 {len(roles)} 个；实际为 {ids}。")
-    if len({r.get("family") for r in roles}) < 2:
-        raise ValueError("roles.json 至少需要两个模型系列。")
+    if any(not isinstance(r.get("family"), str) or not r["family"].strip() for r in roles):
+        raise ValueError("每个席位必须有非空的模型系列 family；允许所有席位使用同一系列。")
     for role in roles:
         if not role.get("role") or not role.get("focus"):
             raise ValueError(role.get("id", "?") + " 缺少 role 或 focus。")

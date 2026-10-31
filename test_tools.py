@@ -932,6 +932,15 @@ class SolveTests(unittest.TestCase):
 
 
 class RunnerSessionTests(unittest.TestCase):
+    def test_transport_continuation_preserves_all_speech_fragments(self):
+        events = [
+            {"type": "text", "part": {"messageID": "msg_first", "type": "text", "text": "Mechanism and evidence."}},
+            {"type": "error", "error": {"message": "Connection lost"}},
+            {"type": "text", "part": {"messageID": "msg_second", "type": "text", "text": "Continuation and JSON."}},
+        ]
+        text = run_debate.last_text("\n".join(json.dumps(e) for e in events))
+        self.assertEqual(text, "Mechanism and evidence.\n\nContinuation and JSON.")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

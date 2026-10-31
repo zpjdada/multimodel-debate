@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>研究议事厅 · 多模型群辩</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/launcher.css"><script src="/app.js" defer></script></head>
+<body><header><div><span class="badge">PRIVATE · 本机私有</span><h1>研究议事厅<span> / Research Council</span></h1><p>独立检索 → 交叉审议 → 冻结投票。让分歧留下证据。</p></div><button id="new">＋ 新建辩论</button></header>
+<div id="notice" role="status"></div>
+<section id="login" hidden><h2>访问私有控制台</h2><p>请从本机服务输出获取访问凭证。</p><input id="token" type="password" placeholder="访问凭证" aria-label="访问凭证"><button id="login-button">登录</button></section>
+<main><aside><h2>本机环境</h2><p id="environment">检测中…</p><button id="reload-models">重新检测模型</button><h2>辩论场次</h2><button id="refresh">刷新列表</button><div id="runs"></div><p class="muted">新场次独立保存到 .console/runs/。现有项目记录只读。API 凭证由本机 OpenCode 管理。</p></aside><article>
+<section id="editor" hidden><div class="section-title"><h2>配置一场新辩论</h2><span class="badge">独立会话 · 跨轮续接</span></div><form id="config">
+<label>辩题 / 场次名称<input id="title" maxlength="200" required placeholder="例如：如何提高小模型的推理效率？"></label>
+<div class="grid"><label>讨论模式<select id="mode"><option value="proposal">Proposal · 找新方向</option><option value="evaluate">Evaluate · 判断问题</option><option value="solve">Solve · 可执行解法</option></select></label><label>轮次<select id="rounds"><option>2</option><option selected>3</option><option>4</option></select></label><label>通过所需票数<input id="threshold" type="number" min="1" value="5" required></label><label>参与席位总数<input id="seat-number" type="number" min="3" max="12" value="6" required></label></div>
+<p id="mode-hint" class="muted"></p>
+<label>要解决的问题 / 期望产出<textarea id="question" rows="3" required placeholder="明确希望讨论组解决什么、交付什么"></textarea></label>
+<label>背景<textarea id="background" rows="3" placeholder="为什么要研究这个问题？目前处于什么阶段？"></textarea></label>
+<label>已知信息、已有尝试与负面结论<textarea id="known" rows="3" placeholder="没有则可留空；不要把未经验证的猜测写成事实"></textarea></label>
+<label>资源、权限与验收条件<textarea id="constraints" rows="3" placeholder="硬件、预算、时间、允许的操作，以及什么算成功"></textarea></label>
+<details><summary>补充简报 / 沿用项目背景</summary><button type="button" id="load-brief">载入项目现有简报</button><label>补充内容<textarea id="brief" rows="8"></textarea></label></details>
+<label>本场材料（PDF / TXT / MD / CSV / JSON，最多20份，共20MB）<input id="materials" type="file" multiple accept=".pdf,.txt,.md,.csv,.json"></label><div id="file-list" class="muted"></div>
+<label class="check"><input id="inherit-materials" type="checkbox">同时复制项目 materials/ 中已有材料</label><p id="project-materials" class="muted"></p>
+<p class="muted">按上方席位总数配置模型与分工，并指定一个主持。可以混用多个模型，也可以让同一个模型担任所有独立席位。</p><div id="seats"></div>
+<div class="actions"><button type="submit" id="save">保存配置</button><button type="submit" id="launch" class="primary">启动辩论</button><span class="muted">启动会调用本机 OpenCode 并产生模型费用；请保持启动窗口运行。</span></div></form></section>
+<section id="detail"><div class="empty"><h2>选择一场辩论，或开始新的研究</h2><p>观点、反驳与共识将在这里逐轮汇集。</p></div></section>
+</article></main><footer>私有本机控制台 · 投票不是事实证明 · 原文与审计结果共同构成记录</footer></body></html>

@@ -17,6 +17,9 @@ HANDOFF.md
 
 # local recordings, subtitles and review notes
 /videos/
+/new_video/
+/VIDEO_*.md
+/assets/cover_title2.png
 
 # docker: local paths in .env, and the fallback config dir
 .env
@@ -25,6 +28,7 @@ HANDOFF.md
 
 # python
 __pycache__/
+.console/
 *.pyc
 
 # exported model inventories and local probes
